@@ -5,7 +5,6 @@ scikit-learn==0.20.1
 xgboost==0.80
 scipy
 kaggle
-sqlite3
 
 # Kedro packages
 kedro==0.15.0
