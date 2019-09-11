@@ -29,26 +29,8 @@
 
 from kedro.pipeline import Pipeline, node
 
-from .nodes.example import predict, report_accuracy, split_data, train_model
 
-# Here you can define your data-driven pipeline by importing your functions
-# and adding them to the pipeline as follows:
-#
-# from nodes.data_wrangling import clean_data, compute_features
-#
-# pipeline = Pipeline([
-#     node(clean_data, 'customers', 'prepared_customers'),
-#     node(compute_features, 'prepared_customers', ['X_train', 'Y_train'])
-# ])
-#
-# Once you have your pipeline defined, you can run it from the root of your
-# project by calling:
-#
-# $ kedro run
-#
-
-
-def create_pipeline(**kwargs):
+def create_pipeline(**_kwargs):
     """Create the project's pipeline.
 
     Args:
@@ -59,39 +41,22 @@ def create_pipeline(**kwargs):
 
     """
 
-
-    ###########################################################################
-    # Here you can find an example pipeline with 4 nodes.
-    #
-    # PLEASE DELETE THIS PIPELINE ONCE YOU START WORKING ON YOUR OWN PROJECT AS
-    # WELL AS THE FILE nodes/example.py
-    # -------------------------------------------------------------------------
-
     pipeline = Pipeline(
         [
             node(
-                split_data,
-                ["example_iris_data", "params:example_test_data_ratio"],
-                dict(
-                    train_x="example_train_x",
-                    train_y="example_train_y",
-                    test_x="example_test_x",
-                    test_y="example_test_y",
-                ),
-            ),
-            node(
-                train_model,
-                ["example_train_x", "example_train_y", "parameters"],
-                "example_model",
-            ),
-            node(
-                predict,
-                dict(model="example_model", test_x="example_test_x"),
-                "example_predictions",
-            ),
-            node(report_accuracy, ["example_predictions", "example_test_y"], None),
+                lambda *x: x,
+                [
+                    "european_player_attributes",
+                    "european_players",
+                    "european_matches",
+                    "european_leagues",
+                    "european_countries",
+                    "european_teams",
+                    "european_team_attributes",
+                ],
+                "data",
+            )
         ]
     )
-    ###########################################################################
 
     return pipeline

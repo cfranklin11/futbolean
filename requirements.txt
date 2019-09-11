@@ -4,6 +4,7 @@ pandas>=0.23.0,<0.26.0
 scikit-learn==0.20.1
 xgboost==0.80
 scipy
+kaggle
 
 # Kedro packages
 kedro==0.15.0
