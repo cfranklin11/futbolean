@@ -1,3 +1,5 @@
+"""Setup module for Kedro"""
+
 # Copyright 2018-2019 QuantumBlack Visual Analytics Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -28,9 +30,7 @@
 
 from setuptools import find_packages, setup
 
-entry_point = (
-    "futbolean = futbolean.run:main"
-)
+entry_point = "futbolean = futbolean.run:main"
 
 # get the dependencies and installs
 with open("requirements.txt", "r", encoding="utf-8") as f:
