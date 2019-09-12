@@ -1,18 +1,28 @@
 version: "3.2"
 services:
   data_science:
-    build: .
+    build: ./data_science
     volumes:
-      - ./:/app
+      - ./data_science:/app
     stdin_open: true
     tty: true
     environment:
       - PYTHONPATH=./src
       - KAGGLE_CONFIG_DIR=/app/.kaggle/
+    depends_on:
+      - futbol_data
+  futbol_data:
+    build: ./futboldata
+    volumes:
+      - ./futboldata:/app
+    ports:
+      - "8080:8080"
+    stdin_open: true
+    tty: true
   notebook:
     image: futbolean_data_science:latest
     volumes:
-      - ./:/app
+      - ./data_science:/app
     ports:
       - "8888:8888"
     depends_on:
