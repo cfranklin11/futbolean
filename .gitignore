@@ -163,4 +163,8 @@ venv.bak/
 
 # garbage files
 Untitled.ipynb
+
+##########################
+# R PACKAGE
+
 .Rproj.user
