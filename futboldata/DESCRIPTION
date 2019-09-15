@@ -11,20 +11,22 @@ Encoding: UTF-8
 LazyData: true
 Imports:
     BH,
+    binman,
     dplyr,
     devtools,
-    fitzRoy,
     plogr,
     plumber,
     progress,
     purrr,
+    RSelenium,
+    readr
     rvest,
     stringr,
-    tidyr
+    tidyr,
+    wdman
 Suggests:
     roxygen2,
     testthat,
 Remotes:
-    git@github.com:jimmyday12/fitzRoy.git,
     git@github.com:tidyverse/tidyr.git
 RoxygenNote: 6.1.1
