@@ -2,30 +2,30 @@
 # KEDRO PROJECT
 
 # ignore all local configuration
-data_science/conf/local/**
-!data_science/conf/local/.gitkeep
+**/conf/local/**
+!**/conf/local/.gitkeep
 
 # ignore potentially sensitive credentials files
-data_science/conf/**/*credentials*
+**/conf/**/*credentials*
 .kaggle
 
 # ignore everything in the following folders
-data_science/data/**
-data_science/logs/**
-data_science/references/**
-data_science/results/**
+**/data/**
+**/logs/**
+**/references/**
+**/results/**
 
 # except their sub-folders
-!data_science/data/**/
-!data_science/logs/**/
-!data_science/references/**/
-!data_science/results/**/
+!**/data/**/
+!**/logs/**/
+!**/references/**/
+!**/results/**/
 
 # also keep all .gitkeep files
 !.gitkeep
 
 # keep also the example dataset
-!data_science/data/01_raw/iris.csv
+!**/data/01_raw/iris.csv
 
 
 ##########################
@@ -134,8 +134,8 @@ target/
 .ipynb_checkpoints
 
 # IPython
-data_science/.ipython/profile_default/history.sqlite
-data_science/.ipython/profile_default/startup/README
+**/.ipython/profile_default/history.sqlite
+**/.ipython/profile_default/startup/README
 
 # pyenv
 .python-version
@@ -168,3 +168,5 @@ Untitled.ipynb
 # R PACKAGE
 
 .Rproj.user
+.RData
+.Rhistory
