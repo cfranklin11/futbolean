@@ -1,7 +1,50 @@
 require(RSelenium)
 
 scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox")) {
-  clean_csv_strings <- function(player_name, csv_string) {
+  assert_regex_matches <- function(player_position_match_groups, expected_match_group_count) {
+    if (length(player_position_match_groups) == expected_match_group_count) {
+      return()
+    }
+
+    invalid_matches <- paste0(player_position_match_groups, collapse = ",")
+
+    stop(
+      paste0(
+        "Expected regex to match with one capturing group, but got the following ",
+        "match groups instead:\n",
+        invalid_matches
+      )
+    )
+  }
+
+  # RSelenium silently fails when you tell it to navigate to a junk URL,
+  # staying on the same page and resulting in a difficult-to-understand error
+  # getting raised later
+  assert_browser_at_navigated_url <- function(browser, url) {
+    current_url <- browser$getCurrentUrl()
+
+    if (current_url == url) {
+      return()
+    }
+
+    # Sometimes the source of the bug is passing a vector or list as the URL,
+    # which we want to collapse for a readable error message; otherwise,
+    # paste0 iterates over it
+    invalid_url <- paste0(url, collapse = ", ")
+
+    stop(
+      paste0(
+        "Expected current URL to be ", invalid_url, ",\n",
+        "but instead the browser is at ", current_url
+      )
+    )
+  }
+
+  get_href <- function(link_element) {
+    link_element$getElementAttribute("href")
+  }
+
+  clean_csv_strings <- function(player_info, csv_string) {
     N_HEADER_ROWS = 2
 
     csv_rows <- csv_string %>%
@@ -12,28 +55,138 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
       purrr::map(~ stringr::str_split(., ",")) %>%
       purrr::pmap(paste0) %>%
       unlist %>%
-      c("Player", .) %>%
-      paste0(., collapse = ",")
+      c(player_info[["player_cols"]], .) %>%
+      paste0(., collapse = ",") %>%
+      # I don't really like how spaces look in col labels, and most of the labels
+      # are in pascal case anyway
+      stringr::str_replace_all(., " ", "")
+
+    player_values <- paste0(player_info[["player_values"]], collapse = ",")
 
     csv_body_rows <-  csv_rows[(N_HEADER_ROWS + 1):length(rows)] %>%
-      purrr::map(~ paste0(player_name, ",", .)) %>%
+      purrr::map(~ paste0(player_values, ",", .)) %>%
       unlist
 
-      paste0(c(csv_header_row, csv_body_rows), collapse = "\n")
+    paste0(c(csv_header_row, csv_body_rows), collapse = "\n")
   }
 
-  get_href <- function(link_element) {
-    link_element$getElementAttribute("href")
+  # Not all players have a full name field in their info section, which shifts
+  # all later fields up the page by one (i.e. down by one in terms of index number)
+  n_indices_to_shift_by <- function(player_info_elements) {
+    DEFAULT_PLAYER_INFO_ELEMENT_COUNT <- 6
+    NO_SHIFT <- 0
+    SHIFT_UP_BY_ONE <- -1
+
+    if (length(player_info_elements) == DEFAULT_PLAYER_INFO_ELEMENT_COUNT) {
+      return(NO_SHIFT)
+    }
+
+    SHIFT_UP_BY_ONE
   }
 
-  scrape_individual_match_stats <- function(browser, player_match_labels) {
+  scrape_player_national_team <- function(player_info_elements, match_group_index) {
+    DEFAULT_NATIONAL_TEAM_INDEX <- 5
+    NATIONAL_TEAM_REGEX <- "National Team: (.+) [:alpha:]{2}"
+
+    national_team_index <- DEFAULT_NATIONAL_TEAM_INDEX + n_indices_to_shift_by(player_info_elements)
+    national_team_element <- player_info_elements[[national_team_index]]
+
+    national_team_match_groups <- national_team_element$getElementText() %>%
+      stringr::str_match(NATIONAL_TEAM_REGEX)
+
+    assert_regex_matches(national_team_match_groups, match_group_index)
+
+    national_team_match_groups[[match_group_index]]
+  }
+
+  scrape_player_birthdate <- function(player_info_elements, match_group_index) {
+    DEFAULT_BIRTHDATE_INDEX <- 4
+    BIRTHDATE_REGEX <- "Born: ([:alpha:]+ [:digit:]{1,2}, [:digit:]{4})"
+
+    birthdate_index <- DEFAULT_BIRTHDATE_INDEX + n_indices_to_shift_by(player_info_elements)
+    birthdate_element <- player_info_elements[[birthdate_index]]
+
+    birthdate_match_groups <- birthdate_element$getElementText() %>%
+      stringr::str_match(BIRTHDATE_REGEX)
+
+    assert_regex_matches(birthdate_match_groups, match_group_index)
+
+    birthdate_match_groups[[match_group_index]]
+  }
+
+  scrape_player_height_weight <- function(player_info_elements, match_group_index) {
+    DEFAULT_HEIGHT_WEIGHT_INDEX <- 3
+    HEIGHT_WEIGHT_REGEX <- "([:digit:]+cm, [:digit:]+kg)"
+
+    height_weight_index <- DEFAULT_HEIGHT_WEIGHT_INDEX + n_indices_to_shift_by(player_info_elements)
+    height_weight_element <- player_info_elements[[height_weight_index]]
+
+    height_weight_match_groups <- height_weight_element$getElementText() %>%
+      stringr::str_match(HEIGHT_WEIGHT_REGEX)
+
+    assert_regex_matches(height_weight_match_groups, match_group_index)
+
+    height_weight_match_groups[[match_group_index]] %>%
+      stringr::str_replace_all(., "[:alpha:]", "") %>%
+      stringr::str_split(., ", ") %>%
+      unlist
+  }
+
+  scrape_player_position <- function(player_info_elements, match_group_index) {
+    DEFAULT_PLAYER_POSITION_INDEX <- 2
+
+    FIRST_POSITION_REGEX <- "[:alpha:]+"
+    SECOND_POSITION_REGEX <- "(?:-[:alpha:]+)?"
+    GENERAL_POSITION_REGEX <- paste0(FIRST_POSITION_REGEX, SECOND_POSITION_REGEX)
+    EXTRA_POSITION_INFO <- "(?:, [:alpha:])?"
+    SPECIFIC_POSITION_REGEX <- paste0("(?: \\(", GENERAL_POSITION_REGEX, EXTRA_POSITION_INFO, "\\))?")
+    PLAYER_POSITION_REGEX <- paste0(
+      "Position: (", GENERAL_POSITION_REGEX, SPECIFIC_POSITION_REGEX, ")"
+    )
+
+    player_position_index <- DEFAULT_PLAYER_POSITION_INDEX + n_indices_to_shift_by(player_info_elements)
+    player_position_element <- player_info_elements[[player_position_index]]
+
+    player_position_match_groups <- player_position_element$getElementText() %>% stringr::str_match(PLAYER_POSITION_REGEX)
+
+    assert_regex_matches(player_position_match_groups, match_group_index)
+
+    player_position_match_groups[[match_group_index]] %>%
+      stringr::str_replace_all(., ", ", "-")
+  }
+
+  scrape_player_info <- function(browser) {
+    PLAYER_NAME_SELECTOR <- "h1[itemprop='name']"
+    PLAYER_INFO_SELECTOR <- "[itemtype='https://schema.org/Person'] p"
+    MATCH_GROUP_INDEX <- 2
+    PLAYER_INFO_COLS <- c("Player", "Position", "HeightCm", "WeightKg", "Birthdate", "NationalTeam")
+
+    player_name <- browser$findElement(using = "css", PLAYER_NAME_SELECTOR)$getElementText() %>%
+      .[[1]]
+
+    player_info_elements <- browser$findElements(using = "css", PLAYER_INFO_SELECTOR)
+
+    player_position <- scrape_player_position(player_info_elements, MATCH_GROUP_INDEX)
+    height_weight <- scrape_player_height_weight(player_info_elements, MATCH_GROUP_INDEX)
+    birthdate <- scrape_player_birthdate(player_info_elements, MATCH_GROUP_INDEX)
+    national_team <- scrape_player_national_team(player_info_elements, MATCH_GROUP_INDEX)
+
+    player_info_values <- c(player_name, player_position, height_weight, birthdate, national_team) %>%
+      # Birthdate value has a ',' between day & year, but might as well replace
+      # any potential commas to avoid CSV parsing errors
+      purrr::map(~ stringr::str_replace_all(., ",", "")) %>%
+      unlist
+
+    list(player_values = player_info_values, player_cols = PLAYER_INFO_COLS)
+  }
+
+  scrape_individual_match_stats <- function(browser, url) {
     TO_CSV_BUTTON_SELECTOR <- paste0(
       "#all_kitchen_sink_matchlogs .section_heading_text .hasmore li:nth-child(4) button"
     )
 
-    browser$navigate(player_match_labels[["url"]])
-
-    # browser$findElement(using = "css", "#all_kitchen_sink_matchlogs .section_heading_text .hasmore li:nth-child(4) button")
+    browser$navigate(url)
+    assert_browser_at_navigated_url(browser, url)
 
     # Need to execute JS to click the button because calling $clickElement()
     # on the webElement object doesn't do anything. The selector is probably
@@ -68,32 +221,23 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
       )
     }
 
-    clean_csv_strings(
-      player_match_labels[["name"]],
-      csv_elements[[1]]$getElementText()
-    )
+    player_info <- scrape_player_info(browser)
+
+    clean_csv_strings(player_info, csv_elements[[1]]$getElementText())
   }
 
-  scrape_individual_player_stats <- function(browser, player_url) {
-    PLAYER_NAME_SELECTOR <- "h1[itemprop='name']"
+  scrape_individual_player_stats <- function(browser, url) {
     # Selecting domestic leage matches only, because players don't always have
     # matches in international competitions (e.g. Champions League),
     # and I want to keep it relatively simple & consistent for now.
     # Might include international matches sometime later.
     DOMESTIC_COMPS_MATCH_LINK_SELECTOR <- "#all_stats_player [data-stat='matches'] a"
 
-    browser$navigate(player_url)
+    browser$navigate(url)
+    assert_browser_at_navigated_url(browser, url)
 
-    player_name <- browser$findElement(
-      using = "css", PLAYER_NAME_SELECTOR
-    )$getElementText()
-
-    match_urls <- browser$findElements(
-      using = "css", DOMESTIC_COMPS_MATCH_LINK_SELECTOR
-    ) %>%
-      purrr::map(get_href) %>%
-      unlist %>%
-      purrr::map(~ c(url = ., name = player_name))
+    browser$findElements(using = "css", DOMESTIC_COMPS_MATCH_LINK_SELECTOR) %>%
+      purrr::map(get_href)
   }
 
   PLAYER_STATS_URL = "https://fbref.com/en/comps/9/stats/Premier-League-Stats"
@@ -122,8 +266,9 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
   stats <- browser$findElements(using = "css", PLAYER_LINK_SELECTOR) %>%
     purrr::map(get_href) %>%
     unlist %>%
+    .[1:5] %>%
     purrr::map(~ scrape_individual_player_stats(browser, .)) %>%
-    unlist(., recursive = FALSE) %>%
+    unlist %>%
     purrr::map(~ scrape_individual_match_stats(browser, .)) %>%
     purrr::map(readr::read_csv) %>%
     purrr::map(
