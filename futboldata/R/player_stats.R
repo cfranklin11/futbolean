@@ -61,9 +61,10 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
       # are in pascal case anyway
       stringr::str_replace_all(., " ", "")
 
-    player_values <- paste0(player_info[["player_values"]], collapse = ",")
+    non_table_values <- c(player_info[["player_values"]])
+    player_values <- paste0(non_table_values, collapse = ",")
 
-    csv_body_rows <-  csv_rows[(N_HEADER_ROWS + 1):length(rows)] %>%
+    csv_body_rows <-  csv_rows[(N_HEADER_ROWS + 1):length(csv_rows)] %>%
       purrr::map(~ paste0(player_values, ",", .)) %>%
       unlist
 
@@ -155,14 +156,21 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
       stringr::str_replace_all(., ", ", "-")
   }
 
-  scrape_player_info <- function(browser) {
+  scrape_player_info <- function(browser, competition_name) {
     PLAYER_NAME_SELECTOR <- "h1[itemprop='name']"
     PLAYER_INFO_SELECTOR <- "[itemtype='https://schema.org/Person'] p"
     MATCH_GROUP_INDEX <- 2
-    PLAYER_INFO_COLS <- c("Player", "Position", "HeightCm", "WeightKg", "Birthdate", "NationalTeam")
+    PLAYER_INFO_COLS <- c(
+      "Player",
+      "Position",
+      "HeightCm",
+      "WeightKg",
+      "Birthdate",
+      "NationalTeam",
+      "Competition"
+    )
 
-    player_name <- browser$findElement(using = "css", PLAYER_NAME_SELECTOR)$getElementText() %>%
-      .[[1]]
+    player_name <- browser$findElement(using = "css", PLAYER_NAME_SELECTOR)$getElementText()
 
     player_info_elements <- browser$findElements(using = "css", PLAYER_INFO_SELECTOR)
 
@@ -171,22 +179,76 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
     birthdate <- scrape_player_birthdate(player_info_elements, MATCH_GROUP_INDEX)
     national_team <- scrape_player_national_team(player_info_elements, MATCH_GROUP_INDEX)
 
-    player_info_values <- c(player_name, player_position, height_weight, birthdate, national_team) %>%
+    player_info_values <- c(
+      player_name,
+      player_position,
+      height_weight,
+      birthdate,
+      national_team,
+      competition_name
+    )
+
+    clean_player_values <- player_info_values %>%
       # Birthdate value has a ',' between day & year, but might as well replace
       # any potential commas to avoid CSV parsing errors
       purrr::map(~ stringr::str_replace_all(., ",", "")) %>%
       unlist
 
-    list(player_values = player_info_values, player_cols = PLAYER_INFO_COLS)
+    list(player_values = clean_player_values, player_cols = PLAYER_INFO_COLS)
   }
 
-  scrape_individual_match_stats <- function(browser, url) {
-    TO_CSV_BUTTON_SELECTOR <- paste0(
-      "#all_kitchen_sink_matchlogs .section_heading_text .hasmore li:nth-child(4) button"
+  scrape_individual_match_stats <- function(browser, url_comp) {
+    # FBRef will display up to 3 data tables, separated by competiton:
+    # 1. #ks_matchlogs_all = All competitions
+    # 2. #ks_matchlogs_<4-digit number> = Domestic league competition
+    # 3. #ks_matchologs_<4-digit number> = International competition (if available)
+    DATA_DIV_SELECTOR = "div[id^=all_ks_matchlogs_]"
+    DATA_TABLE_SELECTOR = "table[id^=ks_matchlogs_]"
+    BASE_TO_CSV_BUTTON_SELECTOR <- paste0(
+      ".section_heading_text .hasmore li:nth-child(4) button"
     )
+    CSV_ELEMENT_SELECTOR <- "pre[id^=csv_ks_matchlogs_]"
 
+    url <- url_comp[["url"]]
     browser$navigate(url)
     assert_browser_at_navigated_url(browser, url)
+
+    comp_data_tables <- browser$findElements(using = "css", DATA_TABLE_SELECTOR)
+    domestic_comp_data_only <- length(comp_data_tables) == 1
+
+    if (domestic_comp_data_only) {
+      # Position of domestic competition data table depends on whether data
+      # from other competitions exist.
+      domestic_comp_index <- 1
+    } else {
+      domestic_comp_index <- 2
+
+      # Need to click the domestic competition button to show the table,
+      # because the to-csv button only converts the table that's currently visible
+      domestic_comp_button_selector <- paste0(
+        "#all_ks_matchlogs_all [data-show^='#all_ks_matchlogs_']:nth-child(",
+        domestic_comp_index,
+        ")"
+      )
+
+      browser$findElement(using = "css", domestic_comp_button_selector)$clickElement()
+    }
+
+    domestic_comp_table_selector <- paste0(
+      ":nth-child(", domestic_comp_index ,") "
+    )
+
+
+    # We're using the domestic competition match data only, because it's more
+    # consistent (i.e. some players participate in international comps some
+    # years). Adding international competition data might be useful
+    # (i.e. good players might suffer fatigue from the extra matches),
+    # but, for now, it's not worth the extra effort cleaning the data.
+    to_csv_button_selector <- paste0(
+      DATA_DIV_SELECTOR,
+      domestic_comp_table_selector,
+      BASE_TO_CSV_BUTTON_SELECTOR
+    )
 
     # Need to execute JS to click the button because calling $clickElement()
     # on the webElement object doesn't do anything. The selector is probably
@@ -195,49 +257,42 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
     # of accidentally querying for more than one intends.
     browser$executeScript(
       paste0(
-        "document.querySelector('", TO_CSV_BUTTON_SELECTOR, "').click()"
+        "document.querySelector('", to_csv_button_selector, "').click()"
       )
     )
 
-    # FBRef are inconsistent in identifying the resulting csv elements,
-    # using id="csv_ks_matchlogs_all" when there are matches
-    # from international competitions present and
-    # id="csv_ks_matchlogs_<some number>" when there are only matches
-    # from domestic competitions. Since whether a player will have
-    # international matches in a given season is variable, and we have no way
-    # of knowing what the ID will be, we select for the <pre> element
-    # and hope they don't start adding more than one to a page.
-    csv_elements <- browser$findElements(using = "css", "pre")
-    csv_element_count <- length(csv_elements)
+    csv_element <- browser$findElement(using = "css", CSV_ELEMENT_SELECTOR)
+    player_info <- scrape_player_info(browser, url_comp[["comp"]])
 
-    if (length(csv_elements) > 1) {
-      stop(
-        paste0(
-          "Expected one <pre> element per page, but found ",
-          csv_element_count,
-          " on ",
-          browser$getCurrentUrl()
-        )
-      )
-    }
-
-    player_info <- scrape_player_info(browser)
-
-    clean_csv_strings(player_info, csv_elements[[1]]$getElementText())
+    clean_csv_strings(player_info, csv_element$getElementText())
   }
 
   scrape_individual_player_stats <- function(browser, url) {
-    # Selecting domestic leage matches only, because players don't always have
+    # Selecting domestic league matches only, because players don't always have
     # matches in international competitions (e.g. Champions League),
     # and I want to keep it relatively simple & consistent for now.
     # Might include international matches sometime later.
     DOMESTIC_COMPS_MATCH_LINK_SELECTOR <- "#all_stats_player [data-stat='matches'] a"
+    DOMESTIC_COMPS_COMP_LINK_SELECTOR <- "#all_stats_player [data-stat='comp_level'] a"
 
     browser$navigate(url)
     assert_browser_at_navigated_url(browser, url)
 
-    browser$findElements(using = "css", DOMESTIC_COMPS_MATCH_LINK_SELECTOR) %>%
-      purrr::map(get_href)
+    match_urls <- browser$findElements(
+      using = "css", DOMESTIC_COMPS_MATCH_LINK_SELECTOR
+    ) %>%
+      purrr::map(get_href) %>%
+      unlist
+
+    comp_elements <- browser$findElements(
+      using = "css", DOMESTIC_COMPS_COMP_LINK_SELECTOR
+    )
+
+    comp_names <- comp_elements[(length(comp_elements) - length(match_urls) + 1):length(comp_elements)] %>%
+      purrr::map(~ .$getElementText()) %>%
+      unlist
+
+    purrr::map2(match_urls, comp_names, ~ list(url = .x, comp = .y))
   }
 
   PLAYER_STATS_URL = "https://fbref.com/en/comps/9/stats/Premier-League-Stats"
@@ -268,12 +323,14 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
     unlist %>%
     .[1:5] %>%
     purrr::map(~ scrape_individual_player_stats(browser, .)) %>%
-    unlist %>%
+    unlist(., recursive = FALSE) %>%
     purrr::map(~ scrape_individual_match_stats(browser, .)) %>%
     purrr::map(readr::read_csv) %>%
     purrr::map(
       ~ dplyr::mutate(
         .,
+        HeightCm = as.numeric(HeightCm),
+        WeightKg = as.numeric(WeightKg),
         Min = as.numeric(Min),
         OffenseGls = as.numeric(OffenseGls),
         OffenseAst = as.numeric(OffenseAst),
@@ -294,7 +351,7 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
     tidyr::drop_na(., Date) %>%
     tidyr::replace_na(., STATS_COL_FILL)
 
-  driver$server$stop()
+  # driver$server$stop()
 
   stats
 }
