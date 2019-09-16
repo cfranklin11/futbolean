@@ -167,7 +167,7 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
       "WeightKg",
       "Birthdate",
       "NationalTeam",
-      "Competition"
+      "SeasonCompetition"
     )
 
     player_name <- browser$findElement(using = "css", PLAYER_NAME_SELECTOR)$getElementText()
@@ -202,53 +202,15 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
     # 1. #ks_matchlogs_all = All competitions
     # 2. #ks_matchlogs_<4-digit number> = Domestic league competition
     # 3. #ks_matchologs_<4-digit number> = International competition (if available)
-    DATA_DIV_SELECTOR = "div[id^=all_ks_matchlogs_]"
-    DATA_TABLE_SELECTOR = "table[id^=ks_matchlogs_]"
-    BASE_TO_CSV_BUTTON_SELECTOR <- paste0(
-      ".section_heading_text .hasmore li:nth-child(4) button"
+    # None of these is guaranteed to appear, so the selector must be flexible
+    TO_CSV_BUTTON_SELECTOR <- paste0(
+      "div[id^=all_ks_matchlogs_] .section_heading_text .hasmore li:nth-child(4) button"
     )
     CSV_ELEMENT_SELECTOR <- "pre[id^=csv_ks_matchlogs_]"
 
     url <- url_comp[["url"]]
     browser$navigate(url)
     assert_browser_at_navigated_url(browser, url)
-
-    comp_data_tables <- browser$findElements(using = "css", DATA_TABLE_SELECTOR)
-    domestic_comp_data_only <- length(comp_data_tables) == 1
-
-    if (domestic_comp_data_only) {
-      # Position of domestic competition data table depends on whether data
-      # from other competitions exist.
-      domestic_comp_index <- 1
-    } else {
-      domestic_comp_index <- 2
-
-      # Need to click the domestic competition button to show the table,
-      # because the to-csv button only converts the table that's currently visible
-      domestic_comp_button_selector <- paste0(
-        "#all_ks_matchlogs_all [data-show^='#all_ks_matchlogs_']:nth-child(",
-        domestic_comp_index,
-        ")"
-      )
-
-      browser$findElement(using = "css", domestic_comp_button_selector)$clickElement()
-    }
-
-    domestic_comp_table_selector <- paste0(
-      ":nth-child(", domestic_comp_index ,") "
-    )
-
-
-    # We're using the domestic competition match data only, because it's more
-    # consistent (i.e. some players participate in international comps some
-    # years). Adding international competition data might be useful
-    # (i.e. good players might suffer fatigue from the extra matches),
-    # but, for now, it's not worth the extra effort cleaning the data.
-    to_csv_button_selector <- paste0(
-      DATA_DIV_SELECTOR,
-      domestic_comp_table_selector,
-      BASE_TO_CSV_BUTTON_SELECTOR
-    )
 
     # Need to execute JS to click the button because calling $clickElement()
     # on the webElement object doesn't do anything. The selector is probably
@@ -257,7 +219,7 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
     # of accidentally querying for more than one intends.
     browser$executeScript(
       paste0(
-        "document.querySelector('", to_csv_button_selector, "').click()"
+        "document.querySelector('", TO_CSV_BUTTON_SELECTOR, "').click()"
       )
     )
 
@@ -282,7 +244,10 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
       using = "css", DOMESTIC_COMPS_MATCH_LINK_SELECTOR
     ) %>%
       purrr::map(get_href) %>%
-      unlist
+      unlist %>%
+      # Match URLs can be duplicated if a player played for two different teams
+      # in one season
+      unique
 
     comp_elements <- browser$findElements(
       using = "css", DOMESTIC_COMPS_COMP_LINK_SELECTOR
@@ -298,6 +263,8 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
   PLAYER_STATS_URL = "https://fbref.com/en/comps/9/stats/Premier-League-Stats"
   PLAYER_LINK_SELECTOR = "#stats_player [data-stat='player'] a"
   STATS_COL_FILL = list(
+    HeightCm = 0,
+    WeightKg = 0,
     Min = 0,
     OffenseGls = 0,
     OffenseAst = 0,
@@ -349,9 +316,11 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
     ) %>%
     dplyr::bind_rows(.) %>%
     tidyr::drop_na(., Date) %>%
-    tidyr::replace_na(., STATS_COL_FILL)
+    tidyr::replace_na(., STATS_COL_FILL) %>%
+    dplyr::mutate(., Comp = dplyr::coalesce(Comp, SeasonCompetition)) %>%
+    dplyr::select(., -c("SeasonCompetition"))
 
-  # driver$server$stop()
+  driver$server$stop()
 
   stats
 }
