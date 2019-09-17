@@ -1,22 +1,6 @@
 require(RSelenium)
 
 scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox")) {
-  assert_regex_matches <- function(player_position_match_groups, expected_match_group_count) {
-    if (length(player_position_match_groups) == expected_match_group_count) {
-      return()
-    }
-
-    invalid_matches <- paste0(player_position_match_groups, collapse = ",")
-
-    stop(
-      paste0(
-        "Expected regex to match with one capturing group, but got the following ",
-        "match groups instead:\n",
-        invalid_matches
-      )
-    )
-  }
-
   # RSelenium silently fails when you tell it to navigate to a junk URL,
   # staying on the same page and resulting in a difficult-to-understand error
   # getting raised later
@@ -40,6 +24,14 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
     )
   }
 
+  coerce_optional_col_to_numeric <- function(data_frame, col_name) {
+    if (is.null(data_frame[[col_name]])) {
+      return(numeric(nrow(data_frame)))
+    }
+
+    as.numeric(data_frame[[col_name]])
+  }
+
   get_href <- function(link_element) {
     link_element$getElementAttribute("href")
   }
@@ -59,7 +51,8 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
       paste0(., collapse = ",") %>%
       # I don't really like how spaces look in col labels, and most of the labels
       # are in pascal case anyway
-      stringr::str_replace_all(., " ", "")
+      stringr::str_replace_all(., " ", "") %>%
+      stringr::str_replace_all(., "%", "Percentage")
 
     non_table_values <- c(player_info[["player_values"]])
     player_values <- paste0(non_table_values, collapse = ",")
@@ -71,86 +64,112 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
     paste0(c(csv_header_row, csv_body_rows), collapse = "\n")
   }
 
-  # Not all players have a full name field in their info section, which shifts
-  # all later fields up the page by one (i.e. down by one in terms of index number)
-  n_indices_to_shift_by <- function(player_info_elements) {
-    DEFAULT_PLAYER_INFO_ELEMENT_COUNT <- 6
-    NO_SHIFT <- 0
-    SHIFT_UP_BY_ONE <- -1
+  scrape_player_national_team <- function(player_info_fields, match_group_index) {
+    NATIONAL_TEAM_LABEL <- "National Team:"
+    NATIONAL_TEAM_REGEX <- paste0(NATIONAL_TEAM_LABEL, " (.+) [:alpha:]{2}")
 
-    if (length(player_info_elements) == DEFAULT_PLAYER_INFO_ELEMENT_COUNT) {
-      return(NO_SHIFT)
+    national_team_text <- player_info_fields %>%
+      purrr::detect(~ grepl(NATIONAL_TEAM_LABEL, .)) %>%
+      unlist
+
+    if (is.null(national_team_text)) {
+      return("")
     }
 
-    SHIFT_UP_BY_ONE
-  }
+    national_team_match_groups <- stringr::str_match(
+      national_team_text, NATIONAL_TEAM_REGEX
+    )
 
-  scrape_player_national_team <- function(player_info_elements, match_group_index) {
-    DEFAULT_NATIONAL_TEAM_INDEX <- 5
-    NATIONAL_TEAM_REGEX <- "National Team: (.+) [:alpha:]{2}"
-
-    national_team_index <- DEFAULT_NATIONAL_TEAM_INDEX + n_indices_to_shift_by(player_info_elements)
-    national_team_element <- player_info_elements[[national_team_index]]
-
-    national_team_match_groups <- national_team_element$getElementText() %>%
-      stringr::str_match(NATIONAL_TEAM_REGEX)
-
-    assert_regex_matches(national_team_match_groups, match_group_index)
+    if (any(is.na(national_team_match_groups))) {
+      return("")
+    }
 
     national_team_match_groups[[match_group_index]]
   }
 
-  scrape_player_birthdate <- function(player_info_elements, match_group_index) {
-    DEFAULT_BIRTHDATE_INDEX <- 4
-    BIRTHDATE_REGEX <- "Born: ([:alpha:]+ [:digit:]{1,2}, [:digit:]{4})"
+  scrape_player_birthdate <- function(player_info_fields, match_group_index) {
+    BIRTHDATE_LABEL <- "Born:"
+    BIRTHDATE_REGEX <- paste0(
+      BIRTHDATE_LABEL, " ([:alpha:]+ [:digit:]{1,2}, [:digit:]{4})"
+    )
 
-    birthdate_index <- DEFAULT_BIRTHDATE_INDEX + n_indices_to_shift_by(player_info_elements)
-    birthdate_element <- player_info_elements[[birthdate_index]]
+    birthdate_text <- player_info_fields %>%
+      purrr::detect(~ grepl(BIRTHDATE_LABEL, .))
 
-    birthdate_match_groups <- birthdate_element$getElementText() %>%
-      stringr::str_match(BIRTHDATE_REGEX)
+    if (is.null(birthdate_text)) {
+      return("")
+    }
 
-    assert_regex_matches(birthdate_match_groups, match_group_index)
+    birthdate_match_groups <- stringr::str_match(birthdate_text, BIRTHDATE_REGEX)
+
+    if (any(is.na(birthdate_match_groups))) {
+      return("")
+    }
 
     birthdate_match_groups[[match_group_index]]
   }
 
-  scrape_player_height_weight <- function(player_info_elements, match_group_index) {
-    DEFAULT_HEIGHT_WEIGHT_INDEX <- 3
-    HEIGHT_WEIGHT_REGEX <- "([:digit:]+cm, [:digit:]+kg)"
+  scrape_player_height_weight <- function(player_info_fields, match_group_index) {
+    HEIGHT_WEIGHT_LABELS <- "cm|kg"
+    HEIGHT_WEIGHT_REGEX <- "((?:[:digit:]+cm)?(?:, )?(?:[:digit:]+kg)?)"
 
-    height_weight_index <- DEFAULT_HEIGHT_WEIGHT_INDEX + n_indices_to_shift_by(player_info_elements)
-    height_weight_element <- player_info_elements[[height_weight_index]]
+    height_weight_text <- player_info_fields %>%
+      purrr::detect(~ grepl(HEIGHT_WEIGHT_LABELS, .))
 
-    height_weight_match_groups <- height_weight_element$getElementText() %>%
-      stringr::str_match(HEIGHT_WEIGHT_REGEX)
+    if (is.null(height_weight_text)) {
+      return(c("", ""))
+    }
 
-    assert_regex_matches(height_weight_match_groups, match_group_index)
+    height_weight_match_groups <- stringr::str_match(
+      height_weight_text, HEIGHT_WEIGHT_REGEX
+    )
 
-    height_weight_match_groups[[match_group_index]] %>%
-      stringr::str_replace_all(., "[:alpha:]", "") %>%
+    if (any(is.na(height_weight_match_groups))) {
+      return(c("", ""))
+    }
+
+    height_weight <- height_weight_match_groups[[match_group_index]] %>%
       stringr::str_split(., ", ") %>%
       unlist
+
+    height <- height_weight %>%
+      purrr::detect(~ grepl("cm", .), .default = "") %>%
+      stringr::str_replace_all(., "[:alpha:]", "") %>%
+      unlist
+
+    weight <- height_weight %>%
+      purrr::detect(~ grepl("kg", .), .default = "") %>%
+      stringr::str_replace_all(., "[:alpha:]", "") %>%
+      unlist
+
+    return(c(height, weight))
   }
 
-  scrape_player_position <- function(player_info_elements, match_group_index) {
-    DEFAULT_PLAYER_POSITION_INDEX <- 2
-
+  scrape_player_position <- function(player_info_fields, match_group_index) {
+    POSITION_LABEL <- "Position:"
     FIRST_POSITION_REGEX <- "[:alpha:]+"
     SECOND_POSITION_REGEX <- "(?:-[:alpha:]+)?"
     GENERAL_POSITION_REGEX <- paste0(FIRST_POSITION_REGEX, SECOND_POSITION_REGEX)
     EXTRA_POSITION_INFO <- "(?:, [:alpha:])?"
     SPECIFIC_POSITION_REGEX <- paste0("(?: \\(", GENERAL_POSITION_REGEX, EXTRA_POSITION_INFO, "\\))?")
     PLAYER_POSITION_REGEX <- paste0(
-      "Position: (", GENERAL_POSITION_REGEX, SPECIFIC_POSITION_REGEX, ")"
+      POSITION_LABEL, " (", GENERAL_POSITION_REGEX, SPECIFIC_POSITION_REGEX, ")"
     )
 
-    player_position_index <- DEFAULT_PLAYER_POSITION_INDEX + n_indices_to_shift_by(player_info_elements)
-    player_position_element <- player_info_elements[[player_position_index]]
+    player_position_text <- player_info_fields %>%
+      purrr::detect(~ grepl(POSITION_LABEL, .))
 
-    player_position_match_groups <- player_position_element$getElementText() %>% stringr::str_match(PLAYER_POSITION_REGEX)
+    if (is.null(player_position_text)) {
+      return("")
+    }
 
-    assert_regex_matches(player_position_match_groups, match_group_index)
+    player_position_match_groups <- stringr::str_match(
+      player_position_text, PLAYER_POSITION_REGEX
+    )
+
+    if (any(is.na(player_position_match_groups))) {
+      return("")
+    }
 
     player_position_match_groups[[match_group_index]] %>%
       stringr::str_replace_all(., ", ", "-")
@@ -172,12 +191,14 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
 
     player_name <- browser$findElement(using = "css", PLAYER_NAME_SELECTOR)$getElementText()
 
-    player_info_elements <- browser$findElements(using = "css", PLAYER_INFO_SELECTOR)
+    player_info_fields <- browser$findElements(using = "css", PLAYER_INFO_SELECTOR) %>%
+      purrr::map(~ .$getElementText()) %>%
+      unlist
 
-    player_position <- scrape_player_position(player_info_elements, MATCH_GROUP_INDEX)
-    height_weight <- scrape_player_height_weight(player_info_elements, MATCH_GROUP_INDEX)
-    birthdate <- scrape_player_birthdate(player_info_elements, MATCH_GROUP_INDEX)
-    national_team <- scrape_player_national_team(player_info_elements, MATCH_GROUP_INDEX)
+    player_position <- scrape_player_position(player_info_fields, MATCH_GROUP_INDEX)
+    height_weight <- scrape_player_height_weight(player_info_fields, MATCH_GROUP_INDEX)
+    birthdate <- scrape_player_birthdate(player_info_fields, MATCH_GROUP_INDEX)
+    national_team <- scrape_player_national_team(player_info_fields, MATCH_GROUP_INDEX)
 
     player_info_values <- c(
       player_name,
@@ -260,11 +281,54 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
     purrr::map2(match_urls, comp_names, ~ list(url = .x, comp = .y))
   }
 
-  PLAYER_STATS_URL = "https://fbref.com/en/comps/9/stats/Premier-League-Stats"
-  PLAYER_LINK_SELECTOR = "#stats_player [data-stat='player'] a"
+  scrape_player_links <- function(
+    browser,
+    player_hrefs = NULL,
+    url = "https://fbref.com/en/comps/9/stats/Premier-League-Stats"
+  ) {
+    PLAYER_LINK_SELECTOR <- "#stats_player [data-stat='player'] a"
+    PREV_BUTTON_SELECTOR <- "a.button2.prev"
+    PAGE_HEADLINE_SELECTOR <- "h1[itemprop='name'"
+    # FBRef doesn't seem to have per-match player data before the 2014-2015 season.
+    # We may want data aggregated by season, which goes back a bit futher,
+    # eventually, but not for now
+    EARLIEST_SEASON_WITH_PLAYER_MATCH_DATA <- "2014-2015"
+
+    browser$navigate(url)
+    assert_browser_at_navigated_url(browser, url)
+
+    this_page_player_hrefs <- browser$findElements(using = "css", PLAYER_LINK_SELECTOR) %>%
+      purrr::map(get_href) %>%
+      unlist
+
+    if (is.null(player_hrefs)) {
+      all_player_hrefs <- this_page_player_hrefs
+    } else {
+      all_player_hrefs <- c(player_hrefs, this_page_player_hrefs) %>% unique
+    }
+
+    headline <- browser$findElement(using = "css", PAGE_HEADLINE_SELECTOR)$getElementText()
+
+    should_scrape_previous_season <- stringr::str_match(
+      headline,
+      EARLIEST_SEASON_WITH_PLAYER_MATCH_DATA
+    ) %>% is.na
+
+    if (should_scrape_previous_season) {
+      prev_season_url <- browser$findElement(using = "css", PREV_BUTTON_SELECTOR) %>%
+        get_href %>%
+        unlist
+
+      return(scrape_player_links(browser, all_player_hrefs, prev_season_url))
+    }
+
+    all_player_hrefs
+  }
+
   STATS_COL_FILL = list(
     HeightCm = 0,
     WeightKg = 0,
+    NationalTeam = "",
     Min = 0,
     OffenseGls = 0,
     OffenseAst = 0,
@@ -278,22 +342,23 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
     DefenseInt = 0,
     DefenseFls = 0,
     DefenseCrdY = 0,
-    DefenseCrdR = 0
+    DefenseCrdR = 0,
+    GoalkeepingCS = 0,
+    GoalkeepingGA = 0,
+    GoalkeepingSaves = 0,
+    GoalkeepingSoTA = 0,
+    GoalkeepingSavePercentage = 0
   )
 
   browser <- driver$client
 
-  browser$navigate(PLAYER_STATS_URL)
-
-  stats <- browser$findElements(using = "css", PLAYER_LINK_SELECTOR) %>%
-    purrr::map(get_href) %>%
-    unlist %>%
-    .[1:5] %>%
+  stats <- scrape_player_links(browser) %>%
     purrr::map(~ scrape_individual_player_stats(browser, .)) %>%
     unlist(., recursive = FALSE) %>%
     purrr::map(~ scrape_individual_match_stats(browser, .)) %>%
     purrr::map(readr::read_csv) %>%
     purrr::map(
+      .,
       ~ dplyr::mutate(
         .,
         HeightCm = as.numeric(HeightCm),
@@ -311,16 +376,21 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
         DefenseInt = as.numeric(DefenseInt),
         DefenseFls = as.numeric(DefenseFls),
         DefenseCrdY = as.numeric(DefenseCrdY),
-        DefenseCrdR = as.numeric(DefenseCrdR)
+        DefenseCrdR = as.numeric(DefenseCrdR),
+        GoalkeepingCS = coerce_optional_col_to_numeric(., "GoalkeepingCS"),
+        GoalkeepingGA = coerce_optional_col_to_numeric(., "GoalkeepingGA"),
+        GoalkeepingSaves = coerce_optional_col_to_numeric(., "GoalkeepingSaves"),
+        GoalkeepingSoTA = coerce_optional_col_to_numeric(., "GoalkeepingSoTA"),
+        GoalkeepingSavePercentage = coerce_optional_col_to_numeric(., "GoalkeepingSavePercentage")
       )
     ) %>%
     dplyr::bind_rows(.) %>%
     tidyr::drop_na(., Date) %>%
     tidyr::replace_na(., STATS_COL_FILL) %>%
     dplyr::mutate(., Comp = dplyr::coalesce(Comp, SeasonCompetition)) %>%
-    dplyr::select(., -c("SeasonCompetition"))
+    dplyr::select(., -c("SeasonCompetition", "MatchReport"))
 
-  driver$server$stop()
+  # driver$server$stop()
 
   stats
 }
