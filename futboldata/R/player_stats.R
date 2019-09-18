@@ -270,6 +270,14 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
       # in one season
       unique
 
+    # Some older player pages don't have links to per-match data pages, so we
+    # just skip them. This seems to only happen with players whose final season
+    # was 2014-2015 (the first season with per-match data), but not sure if it
+    # applies to all players like this or just some.
+    if (is.null(match_urls)) {
+      return(NULL)
+    }
+
     comp_elements <- browser$findElements(
       using = "css", DOMESTIC_COMPS_COMP_LINK_SELECTOR
     )
@@ -355,6 +363,7 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
   stats <- scrape_player_links(browser) %>%
     purrr::map(~ scrape_individual_player_stats(browser, .)) %>%
     unlist(., recursive = FALSE) %>%
+    purrr::discard(is.null) %>%
     purrr::map(~ scrape_individual_match_stats(browser, .)) %>%
     purrr::map(readr::read_csv) %>%
     purrr::map(
