@@ -1,6 +1,7 @@
 require(RSelenium)
 
 scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox")) {
+  print(Sys.time())
   # RSelenium silently fails when you tell it to navigate to a junk URL,
   # staying on the same page and resulting in a difficult-to-understand error
   # getting raised later
@@ -400,6 +401,7 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
     dplyr::select(., -c("SeasonCompetition", "MatchReport"))
 
   # driver$server$stop()
+  print(Sys.time())
 
   stats
 }
