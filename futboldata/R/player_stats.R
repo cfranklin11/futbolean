@@ -291,23 +291,28 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
   }
 
   scrape_player_links <- function(
-    browser,
     player_hrefs = NULL,
-    url = "https://fbref.com/en/comps/9/stats/Premier-League-Stats"
+    path = "/en/comps/9/stats/Premier-League-Stats"
   ) {
+    HOSTNAME = "https://fbref.com"
     PLAYER_LINK_SELECTOR <- "#stats_player [data-stat='player'] a"
     PREV_BUTTON_SELECTOR <- "a.button2.prev"
-    PAGE_HEADLINE_SELECTOR <- "h1[itemprop='name'"
+    PAGE_HEADLINE_SELECTOR <- "h1[itemprop='name']"
     # FBRef doesn't seem to have per-match player data before the 2014-2015 season.
     # We may want data aggregated by season, which goes back a bit futher,
     # eventually, but not for now
     EARLIEST_SEASON_WITH_PLAYER_MATCH_DATA <- "2014-2015"
 
-    browser$navigate(url)
-    assert_browser_at_navigated_url(browser, url)
+    page <- xml2::read_html(paste0(HOSTNAME, path))
 
-    this_page_player_hrefs <- browser$findElements(using = "css", PLAYER_LINK_SELECTOR) %>%
-      purrr::map(get_href) %>%
+    this_page_player_hrefs <- page %>%
+      xml2::xml_find_all(., "//comment()") %>%
+      .[[grep("data-stat=\"player\"", .)]] %>%
+      rvest::html_text(.) %>%
+      stringr::str_replace_all(., "^\n[:space:]+|\n$", "") %>%
+      xml2::read_html(.) %>%
+      rvest::html_nodes(., PLAYER_LINK_SELECTOR) %>%
+      purrr::map(~ rvest::html_attr(., "href")) %>%
       unlist
 
     if (is.null(player_hrefs)) {
@@ -316,19 +321,18 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
       all_player_hrefs <- c(player_hrefs, this_page_player_hrefs) %>% unique
     }
 
-    headline <- browser$findElement(using = "css", PAGE_HEADLINE_SELECTOR)$getElementText()
-
-    should_scrape_previous_season <- stringr::str_match(
-      headline,
-      EARLIEST_SEASON_WITH_PLAYER_MATCH_DATA
-    ) %>% is.na
+    should_scrape_previous_season <- page %>%
+      rvest::html_node(., PAGE_HEADLINE_SELECTOR) %>%
+      rvest::html_text(.) %>%
+      stringr::str_match(., EARLIEST_SEASON_WITH_PLAYER_MATCH_DATA) %>%
+      is.na
 
     if (should_scrape_previous_season) {
-      prev_season_url <- browser$findElement(using = "css", PREV_BUTTON_SELECTOR) %>%
-        get_href %>%
-        unlist
+      prev_season_path <- page %>%
+        rvest::html_node(., PREV_BUTTON_SELECTOR) %>%
+        rvest::html_attr(., "href")
 
-      return(scrape_player_links(browser, all_player_hrefs, prev_season_url))
+      return(scrape_player_links(all_player_hrefs, prev_season_path))
     }
 
     all_player_hrefs
