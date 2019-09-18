@@ -2,6 +2,37 @@ require(RSelenium)
 
 scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox")) {
   print(Sys.time())
+
+  fetch_html <- function(path, n_attempts = 0) {
+    FBREF_HOSTNAME = "https://fbref.com"
+
+    url <- paste0(FBREF_HOSTNAME, path)
+
+    tryCatch(
+      {
+        n_attempts <- n_attempts + 1
+        xml2::read_html(url)
+      },
+      error = function(e) {
+        print(paste0("Raised ", e, " after ", n_attempts, " attempts on URL ", url))
+
+        if (n_attempts > 3) {
+          print(Sys.time())
+
+          stop(
+            paste0(
+              "Stopped trying to scrape URL ", url,
+              " after ", n_attempts, " attempts."
+            )
+          )
+        }
+
+        Sys.sleep(10 * n_attempts)
+        fetch_html(path, n_attempts = n_attempts)
+      }
+    )
+  }
+
   # RSelenium silently fails when you tell it to navigate to a junk URL,
   # staying on the same page and resulting in a difficult-to-understand error
   # getting raised later
@@ -251,7 +282,7 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
     clean_csv_strings(player_info, csv_element$getElementText())
   }
 
-  scrape_individual_player_stats <- function(browser, url) {
+  scrape_individual_player_stats <- function(path) {
     # Selecting domestic league matches only, because players don't always have
     # matches in international competitions (e.g. Champions League),
     # and I want to keep it relatively simple & consistent for now.
@@ -259,13 +290,11 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
     DOMESTIC_COMPS_MATCH_LINK_SELECTOR <- "#all_stats_player [data-stat='matches'] a"
     DOMESTIC_COMPS_COMP_LINK_SELECTOR <- "#all_stats_player [data-stat='comp_level'] a"
 
-    browser$navigate(url)
-    assert_browser_at_navigated_url(browser, url)
+    page <- fetch_html(path)
 
-    match_urls <- browser$findElements(
-      using = "css", DOMESTIC_COMPS_MATCH_LINK_SELECTOR
-    ) %>%
-      purrr::map(get_href) %>%
+    match_urls <- page %>%
+      rvest::html_nodes(., DOMESTIC_COMPS_MATCH_LINK_SELECTOR) %>%
+      purrr::map(~ rvest::html_attr(., "href")) %>%
       unlist %>%
       # Match URLs can be duplicated if a player played for two different teams
       # in one season
@@ -279,12 +308,13 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
       return(NULL)
     }
 
-    comp_elements <- browser$findElements(
-      using = "css", DOMESTIC_COMPS_COMP_LINK_SELECTOR
-    )
-
-    comp_names <- comp_elements[(length(comp_elements) - length(match_urls) + 1):length(comp_elements)] %>%
-      purrr::map(~ .$getElementText()) %>%
+    comp_names <- page %>%
+      rvest::html_nodes(., DOMESTIC_COMPS_COMP_LINK_SELECTOR) %>%
+      # There will often be more rows with competition values than rows with
+      # links to per-match data pages, so we take the last n rows, where
+      # n = number of rows with matches links
+      .[(length(.) - length(match_urls) + 1):length(.)] %>%
+      purrr::map(~ rvest::html_text(.)) %>%
       unlist
 
     purrr::map2(match_urls, comp_names, ~ list(url = .x, comp = .y))
@@ -294,7 +324,6 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
     player_hrefs = NULL,
     path = "/en/comps/9/stats/Premier-League-Stats"
   ) {
-    HOSTNAME = "https://fbref.com"
     PLAYER_LINK_SELECTOR <- "#stats_player [data-stat='player'] a"
     PREV_BUTTON_SELECTOR <- "a.button2.prev"
     PAGE_HEADLINE_SELECTOR <- "h1[itemprop='name']"
@@ -303,7 +332,7 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
     # eventually, but not for now
     EARLIEST_SEASON_WITH_PLAYER_MATCH_DATA <- "2014-2015"
 
-    page <- xml2::read_html(paste0(HOSTNAME, path))
+    page <- fetch_html(path)
 
     this_page_player_hrefs <- page %>%
       xml2::xml_find_all(., "//comment()") %>%
@@ -363,46 +392,45 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
     GoalkeepingSavePercentage = 0
   )
 
-  browser <- driver$client
-
-  stats <- scrape_player_links(browser) %>%
-    purrr::map(~ scrape_individual_player_stats(browser, .)) %>%
+  stats <- scrape_player_links() %>%
+    purrr::map(~ scrape_individual_player_stats(.)) %>%
     unlist(., recursive = FALSE) %>%
-    purrr::discard(is.null) %>%
-    purrr::map(~ scrape_individual_match_stats(browser, .)) %>%
-    purrr::map(readr::read_csv) %>%
-    purrr::map(
-      .,
-      ~ dplyr::mutate(
-        .,
-        HeightCm = as.numeric(HeightCm),
-        WeightKg = as.numeric(WeightKg),
-        Min = as.numeric(Min),
-        OffenseGls = as.numeric(OffenseGls),
-        OffenseAst = as.numeric(OffenseAst),
-        OffenseSh = as.numeric(OffenseSh),
-        OffenseSoT = as.numeric(OffenseSoT),
-        OffenseCrs = as.numeric(OffenseCrs),
-        OffenseFld = as.numeric(OffenseFld),
-        OffensePK = as.numeric(OffensePK),
-        OffensePKatt = as.numeric(OffensePKatt),
-        DefenseTkl = as.numeric(DefenseTkl),
-        DefenseInt = as.numeric(DefenseInt),
-        DefenseFls = as.numeric(DefenseFls),
-        DefenseCrdY = as.numeric(DefenseCrdY),
-        DefenseCrdR = as.numeric(DefenseCrdR),
-        GoalkeepingCS = coerce_optional_col_to_numeric(., "GoalkeepingCS"),
-        GoalkeepingGA = coerce_optional_col_to_numeric(., "GoalkeepingGA"),
-        GoalkeepingSaves = coerce_optional_col_to_numeric(., "GoalkeepingSaves"),
-        GoalkeepingSoTA = coerce_optional_col_to_numeric(., "GoalkeepingSoTA"),
-        GoalkeepingSavePercentage = coerce_optional_col_to_numeric(., "GoalkeepingSavePercentage")
-      )
-    ) %>%
-    dplyr::bind_rows(.) %>%
-    tidyr::drop_na(., Date) %>%
-    tidyr::replace_na(., STATS_COL_FILL) %>%
-    dplyr::mutate(., Comp = dplyr::coalesce(Comp, SeasonCompetition)) %>%
-    dplyr::select(., -c("SeasonCompetition", "MatchReport"))
+    purrr::discard(is.null)
+    #  %>%
+    # purrr::map(~ scrape_individual_match_stats(browser, .)) %>%
+    # purrr::map(readr::read_csv) %>%
+    # purrr::map(
+    #   .,
+    #   ~ dplyr::mutate(
+    #     .,
+    #     HeightCm = as.numeric(HeightCm),
+    #     WeightKg = as.numeric(WeightKg),
+    #     Min = as.numeric(Min),
+    #     OffenseGls = as.numeric(OffenseGls),
+    #     OffenseAst = as.numeric(OffenseAst),
+    #     OffenseSh = as.numeric(OffenseSh),
+    #     OffenseSoT = as.numeric(OffenseSoT),
+    #     OffenseCrs = as.numeric(OffenseCrs),
+    #     OffenseFld = as.numeric(OffenseFld),
+    #     OffensePK = as.numeric(OffensePK),
+    #     OffensePKatt = as.numeric(OffensePKatt),
+    #     DefenseTkl = as.numeric(DefenseTkl),
+    #     DefenseInt = as.numeric(DefenseInt),
+    #     DefenseFls = as.numeric(DefenseFls),
+    #     DefenseCrdY = as.numeric(DefenseCrdY),
+    #     DefenseCrdR = as.numeric(DefenseCrdR),
+    #     GoalkeepingCS = coerce_optional_col_to_numeric(., "GoalkeepingCS"),
+    #     GoalkeepingGA = coerce_optional_col_to_numeric(., "GoalkeepingGA"),
+    #     GoalkeepingSaves = coerce_optional_col_to_numeric(., "GoalkeepingSaves"),
+    #     GoalkeepingSoTA = coerce_optional_col_to_numeric(., "GoalkeepingSoTA"),
+    #     GoalkeepingSavePercentage = coerce_optional_col_to_numeric(., "GoalkeepingSavePercentage")
+    #   )
+    # ) %>%
+    # dplyr::bind_rows(.) %>%
+    # tidyr::drop_na(., Date) %>%
+    # tidyr::replace_na(., STATS_COL_FILL) %>%
+    # dplyr::mutate(., Comp = dplyr::coalesce(Comp, SeasonCompetition)) %>%
+    # dplyr::select(., -c("SeasonCompetition", "MatchReport"))
 
   # driver$server$stop()
   print(Sys.time())
