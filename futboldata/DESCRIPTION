@@ -11,19 +11,17 @@ Encoding: UTF-8
 LazyData: true
 Imports:
     BH,
-    binman,
     dplyr,
     devtools,
     plogr,
     plumber,
     progress,
     purrr,
-    RSelenium,
     readr
     rvest,
     stringr,
+    tibble,
     tidyr,
-    wdman
 Suggests:
     roxygen2,
     testthat,
