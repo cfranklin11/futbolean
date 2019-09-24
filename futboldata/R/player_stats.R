@@ -315,8 +315,7 @@ scrape_player_stats <- function() {
     # FBRef doesn't seem to have per-match player data before the 2014-2015 season.
     # We may want data aggregated by season, which goes back a bit futher,
     # eventually, but not for now
-    # EARLIEST_SEASON_WITH_PLAYER_MATCH_DATA <- "2014-2015"
-    EARLIEST_SEASON_WITH_PLAYER_MATCH_DATA <- "2019-2020"
+    EARLIEST_SEASON_WITH_PLAYER_MATCH_DATA <- "2014-2015"
 
     page <- fetch_html(path)
 
@@ -389,39 +388,39 @@ scrape_player_stats <- function() {
     unlist(., recursive = FALSE) %>%
     purrr::discard(is.null) %>%
     purrr::map(~ scrape_individual_match_stats(.)) %>%
-    purrr::discard(is.null)
-    # purrr::map(
-    #   .,
-    #   ~ dplyr::mutate(
-    #     .,
-    #     HeightCm = as.numeric(HeightCm),
-    #     WeightKg = as.numeric(WeightKg),
-    #     Min = as.numeric(Min),
-    #     OffenseGls = as.numeric(OffenseGls),
-    #     OffenseAst = as.numeric(OffenseAst),
-    #     OffenseSh = as.numeric(OffenseSh),
-    #     OffenseSoT = as.numeric(OffenseSoT),
-    #     OffenseCrs = as.numeric(OffenseCrs),
-    #     OffenseFld = as.numeric(OffenseFld),
-    #     OffensePK = as.numeric(OffensePK),
-    #     OffensePKatt = as.numeric(OffensePKatt),
-    #     DefenseTkl = as.numeric(DefenseTkl),
-    #     DefenseInt = as.numeric(DefenseInt),
-    #     DefenseFls = as.numeric(DefenseFls),
-    #     DefenseCrdY = as.numeric(DefenseCrdY),
-    #     DefenseCrdR = as.numeric(DefenseCrdR),
-    #     GoalkeepingCS = coerce_optional_col_to_numeric(., "GoalkeepingCS"),
-    #     GoalkeepingGA = coerce_optional_col_to_numeric(., "GoalkeepingGA"),
-    #     GoalkeepingSaves = coerce_optional_col_to_numeric(., "GoalkeepingSaves"),
-    #     GoalkeepingSoTA = coerce_optional_col_to_numeric(., "GoalkeepingSoTA"),
-    #     GoalkeepingSavePercentage = coerce_optional_col_to_numeric(., "GoalkeepingSavePercentage")
-    #   )
-    # ) %>%
-    # dplyr::bind_rows(.) %>%
-    # tidyr::drop_na(., Date) %>%
-    # tidyr::replace_na(., STATS_COL_FILL) %>%
-    # dplyr::mutate(., Comp = dplyr::coalesce(Comp, SeasonCompetition)) %>%
-    # dplyr::select(., -c("SeasonCompetition", "MatchReport"))
+    purrr::discard(is.null) %>%
+    purrr::map(
+      .,
+      ~ dplyr::mutate(
+        .,
+        HeightCm = as.numeric(HeightCm),
+        WeightKg = as.numeric(WeightKg),
+        Min = as.numeric(Min),
+        OffenseGls = as.numeric(OffenseGls),
+        OffenseAst = as.numeric(OffenseAst),
+        OffenseSh = as.numeric(OffenseSh),
+        OffenseSoT = as.numeric(OffenseSoT),
+        OffenseCrs = as.numeric(OffenseCrs),
+        OffenseFld = as.numeric(OffenseFld),
+        OffensePK = as.numeric(OffensePK),
+        OffensePKatt = as.numeric(OffensePKatt),
+        DefenseTkl = as.numeric(DefenseTkl),
+        DefenseInt = as.numeric(DefenseInt),
+        DefenseFls = as.numeric(DefenseFls),
+        DefenseCrdY = as.numeric(DefenseCrdY),
+        DefenseCrdR = as.numeric(DefenseCrdR),
+        GoalkeepingCS = coerce_optional_col_to_numeric(., "GoalkeepingCS"),
+        GoalkeepingGA = coerce_optional_col_to_numeric(., "GoalkeepingGA"),
+        GoalkeepingSaves = coerce_optional_col_to_numeric(., "GoalkeepingSaves"),
+        GoalkeepingSoTA = coerce_optional_col_to_numeric(., "GoalkeepingSoTA"),
+        GoalkeepingSavePercentage = coerce_optional_col_to_numeric(., "GoalkeepingSavePercentage")
+      )
+    ) %>%
+    dplyr::bind_rows(.) %>%
+    tidyr::drop_na(., Date) %>%
+    tidyr::replace_na(., STATS_COL_FILL) %>%
+    dplyr::mutate(., Comp = dplyr::coalesce(Comp, SeasonCompetition)) %>%
+    dplyr::select(., -c("SeasonCompetition", "MatchReport"))
 
   print(Sys.time())
 
