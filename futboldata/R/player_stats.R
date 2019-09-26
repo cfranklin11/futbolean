@@ -406,16 +406,17 @@ scrape_player_stats <- function(player_urls) {
     GoalkeepingSavePercentage = 0
   )
 
-  stats <- player_urls %>%
-    purrr::map(~ scrape_individual_player_stats(.)) %>%
-    unlist(., recursive = FALSE) %>%
-    purrr::discard(is.null) %>%
-    purrr::map(~ scrape_individual_match_stats(.)) %>%
-    purrr::discard(is.null) %>%
-    purrr::map(
-      .,
-      ~ dplyr::mutate(
-        .,
+  coerce_column_data_types <- function(data_frame) {
+    COERCE_INVALID_DATE_WARNING = "failed to parse"
+    COERCE_INVALID_NUMBERS_WARNING = "NAs introduced by coercion"
+
+    # Coercing columns results in major warning spam, and since the whole point
+    # of this is to generate NAs for invalid rows, we don't need to hear
+    # about it hundreds of times
+    withCallingHandlers(
+      dplyr::mutate(
+        data_frame,
+        Date = lubridate::as_date(Date),
         HeightCm = as.numeric(HeightCm),
         WeightKg = as.numeric(WeightKg),
         Min = as.numeric(Min),
@@ -432,13 +433,40 @@ scrape_player_stats <- function(player_urls) {
         DefenseFls = as.numeric(DefenseFls),
         DefenseCrdY = as.numeric(DefenseCrdY),
         DefenseCrdR = as.numeric(DefenseCrdR),
-        GoalkeepingCS = coerce_optional_col_to_numeric(., "GoalkeepingCS"),
-        GoalkeepingGA = coerce_optional_col_to_numeric(., "GoalkeepingGA"),
-        GoalkeepingSaves = coerce_optional_col_to_numeric(., "GoalkeepingSaves"),
-        GoalkeepingSoTA = coerce_optional_col_to_numeric(., "GoalkeepingSoTA"),
-        GoalkeepingSavePercentage = coerce_optional_col_to_numeric(., "GoalkeepingSavePercentage")
-      )
-    ) %>%
+        GoalkeepingCS = coerce_optional_col_to_numeric(
+          data_frame, "GoalkeepingCS"
+        ),
+        GoalkeepingGA = coerce_optional_col_to_numeric(
+          data_frame, "GoalkeepingGA"
+        ),
+        GoalkeepingSaves = coerce_optional_col_to_numeric(
+          data_frame, "GoalkeepingSaves"
+        ),
+        GoalkeepingSoTA = coerce_optional_col_to_numeric(
+          data_frame, "GoalkeepingSoTA"
+        ),
+        GoalkeepingSavePercentage = coerce_optional_col_to_numeric(
+          data_frame, "GoalkeepingSavePercentage"
+        )
+      ),
+      warning = function(w) {
+        if (
+          grepl(COERCE_INVALID_DATE_WARNING, w$message) ||
+          grepl(COERCE_INVALID_NUMBERS_WARNING, w$message)
+        ) {
+          invokeRestart("muffleWarning")
+        }
+      }
+    )
+  }
+
+  stats <- player_urls %>%
+    purrr::map(~ scrape_individual_player_stats(.)) %>%
+    unlist(., recursive = FALSE) %>%
+    purrr::discard(is.null) %>%
+    purrr::map(~ scrape_individual_match_stats(.)) %>%
+    purrr::discard(is.null) %>%
+    purrr::map(., coerce_column_data_types) %>%
     dplyr::bind_rows(.) %>%
     tidyr::drop_na(., Date) %>%
     tidyr::replace_na(., STATS_COL_FILL) %>%
