@@ -4,9 +4,7 @@
 EARLIEST_SEASON_WITH_PLAYER_MATCH_DATA <- "2014-2015"
 FBREF_HOSTNAME = "https://fbref.com"
 
-fetch_html <- function(path, n_attempts = 0) {
-  url <- paste0(FBREF_HOSTNAME, path)
-
+fetch_html <- function(url, n_attempts = 0) {
   tryCatch(
     {
       n_attempts <- n_attempts + 1
@@ -31,8 +29,8 @@ fetch_html <- function(path, n_attempts = 0) {
         )
       }
 
-      Sys.sleep(1)
-      fetch_html(path, n_attempts = n_attempts)
+      Sys.sleep(10 * n_attempts)
+      fetch_html(url, n_attempts = n_attempts)
     }
   )
 }
@@ -47,7 +45,8 @@ scrape_player_links <- function(start_season, end_season) {
     PREV_BUTTON_SELECTOR <- "a.button2.prev"
     PAGE_HEADLINE_SELECTOR <- "h1[itemprop='name']"
 
-    page <- fetch_html(path)
+    url <- paste0(FBREF_HOSTNAME, path)
+    page <- fetch_html(url)
 
     page_headline <- page %>%
       rvest::html_node(., PAGE_HEADLINE_SELECTOR) %>%
@@ -326,13 +325,13 @@ scrape_player_stats <- function(player_urls) {
     table_body
   }
 
-  scrape_individual_match_stats <- function(path_and_competition) {
-    path <- path_and_competition[["path"]]
-    competition_name <- path_and_competition[["competition"]]
+  scrape_individual_match_stats <- function(url_and_competition) {
+    url <- url_and_competition[["url"]]
+    competition_name <- url_and_competition[["competition"]]
 
-    page <- fetch_html(path)
+    page <- fetch_html(url)
 
-    player_data_table <- scrape_player_stats(page, path)
+    player_data_table <- scrape_player_stats(page, url)
     player_info <- scrape_player_info(page, competition_name)
 
     if (is.null(player_data_table)) {
@@ -342,7 +341,7 @@ scrape_player_stats <- function(player_urls) {
     do.call(tibble::add_column, c(list(.data = player_data_table), player_info))
   }
 
-  scrape_individual_player_stats <- function(path) {
+  scrape_individual_player_stats <- function(url) {
     # Selecting domestic league matches only, because players don't always have
     # matches in international competitions (e.g. Champions League),
     # and I want to keep it relatively simple & consistent for now.
@@ -350,22 +349,23 @@ scrape_player_stats <- function(player_urls) {
     DOMESTIC_COMPS_MATCH_LINK_SELECTOR <- "#all_stats_player [data-stat='matches'] a"
     DOMESTIC_COMPS_COMP_LINK_SELECTOR <- "#all_stats_player [data-stat='comp_level'] a"
 
-    page <- fetch_html(path)
+    page <- fetch_html(url)
 
-    match_paths <- page %>%
+    match_urls <- page %>%
       rvest::html_nodes(., DOMESTIC_COMPS_MATCH_LINK_SELECTOR) %>%
       purrr::map(~ rvest::html_attr(., "href")) %>%
       unlist %>%
       # Match paths can be duplicated if a player played for two different teams
       # in one season
-      unique
+      unique %>%
+      purrr::map(~ paste0(FBREF_HOSTNAME, .))
 
     # Some older player pages don't have links to per-match data pages, so we
     # just skip them. This seems to only happen with players whose final season
     # was 2014-2015 (the first season with per-match data), but not sure if it
     # applies to all players like this or just some.
-    if (is.null(match_paths)) {
-      print(paste0(path, "didn't have any links to match data pages."))
+    if (is.null(match_urls)) {
+      print(paste0(url, "didn't have any links to match data pages."))
       return(NULL)
     }
 
@@ -374,11 +374,11 @@ scrape_player_stats <- function(player_urls) {
       # There will often be more rows with competition values than rows with
       # links to per-match data pages, so we take the last n rows, where
       # n = number of rows with matches links
-      .[(length(.) - length(match_paths) + 1):length(.)] %>%
+      .[(length(.) - length(match_urls) + 1):length(.)] %>%
       purrr::map(~ rvest::html_text(.)) %>%
       unlist
 
-    purrr::map2(match_paths, comp_names, ~ list(path = .x, competition = .y))
+    purrr::map2(match_urls, comp_names, ~ list(url = .x, competition = .y))
   }
 
   STATS_COL_FILL = list(

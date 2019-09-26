@@ -4,6 +4,9 @@ from typing import List, Dict, Any
 import re
 import os
 import json
+import itertools
+
+import numpy as np
 
 from futbolean.data_import.base_data import fetch_data
 from futbolean.settings import RAW_DATA_DIR
@@ -13,6 +16,13 @@ from futbolean.settings import RAW_DATA_DIR
 # eventually, but not for now
 EARLIEST_SEASON_WITH_PLAYER_MATCH_DATA = "2014-2015"
 LAST_COMPLETE_SEASON = "2018-2019"
+# Based on my experience with AFL player data: I could return roughly 30,000 rows
+# of data in a response, and 200 EPL players, averaging (very roughly)
+# 4 seasons of data each, with roughly 40 (EPL and international) matches
+# per season equals 32,000 rows of data.
+# The size of these batches will likely increase with each new season, so I may
+# have to eventually reduce the number of players per batch.
+PLAYER_BATCH_SIZE = 200
 
 
 def fetch_player_urls(
@@ -49,6 +59,20 @@ def fetch_player_urls(
     return data
 
 
+def _fetch_player_match_data_batch(
+    player_urls: List[str], idx: int, verbose: int = 1
+) -> List[Dict[str, Any]]:
+    if verbose == 1:
+        print(f"Fetching player stats for batch {idx + 1}")
+
+    data = fetch_data("/player_stats", params={"player_urls": player_urls})
+
+    if verbose == 1:
+        print(f"Data for batch {idx + 1} received!")
+
+    return data
+
+
 def fetch_player_match_data(
     player_urls: List[str] = [], verbose: int = 1
 ) -> List[Dict[str, Any]]:
@@ -63,15 +87,25 @@ def fetch_player_match_data(
         list of dicts of player data.
     """
 
-    if verbose == 1:
-        print("Fetching player-match data...")
+    n_urls = len(player_urls)
+    n_batches = round(n_urls / PLAYER_BATCH_SIZE)
+    player_url_batches = np.array_split(np.array(player_urls), n_batches)
 
-    data = fetch_data("/player_stats", params={"player_urls": player_urls})
+    if verbose == 1:
+        print(
+            f"Fetching player-match data in {len(player_url_batches)} batches "
+            f"of roughly {PLAYER_BATCH_SIZE}..."
+        )
+
+    data_batches = [
+        _fetch_player_match_data_batch(player_url_batch, idx, verbose=verbose)
+        for idx, player_url_batch in enumerate(player_url_batches)
+    ]
 
     if verbose == 1:
         print("Player-match data received!")
 
-    return data
+    return list(itertools.chain.from_iterable(data_batches))
 
 
 def save_player_urls(
@@ -131,8 +165,7 @@ def save_player_match_data(
     """
 
     seasons_match = re.search(r"\d{4}-\d{4}", player_url_filepath)
-
-    seasons_label = (seasons_match and f"_{seasons_match[0]}") or ""
+    seasons_label = "" if seasons_match is None else f"_{seasons_match[0]}"
 
     with open(player_url_filepath, "r") as url_file:
         player_urls = json.load(url_file)
@@ -140,8 +173,10 @@ def save_player_match_data(
     data = fetch_player_match_data(player_urls, verbose=verbose)
     filepath = os.path.join(RAW_DATA_DIR, f"epl-player-match-data{seasons_label}.json")
 
-    with open(filepath, "w") as json_file:
-        json.dump(data, json_file, indent=2)
+    # Result columns have a weird UTF-8 dash in the string, so coercing to ASCII
+    # results in weird encoding values
+    with open(filepath, "w", encoding="utf8") as json_file:
+        json.dump(data, json_file, indent=2, ensure_ascii=False)
 
     if verbose == 1:
         print("Player match data saved")

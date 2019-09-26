@@ -25,6 +25,8 @@ services:
       - ./data_science:/app
     ports:
       - "8888:8888"
+    environment:
+      - PYTHONPATH=./src
     depends_on:
       - data_science
     command: kedro jupyter notebook --ip 0.0.0.0 --no-browser --allow-root
