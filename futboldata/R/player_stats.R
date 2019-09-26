@@ -2,47 +2,115 @@
 # We may want data aggregated by season, which goes back a bit futher,
 # eventually, but not for now
 EARLIEST_SEASON_WITH_PLAYER_MATCH_DATA <- "2014-2015"
+FBREF_HOSTNAME = "https://fbref.com"
 
-scrape_player_stats <- function(
-  start_season = EARLIEST_SEASON_WITH_PLAYER_MATCH_DATA,
-  end_season = "2018-2019"
-) {
-  print(Sys.time())
+fetch_html <- function(path, n_attempts = 0) {
+  url <- paste0(FBREF_HOSTNAME, path)
 
-  fetch_html <- function(path, n_attempts = 0) {
-    FBREF_HOSTNAME = "https://fbref.com"
+  tryCatch(
+    {
+      n_attempts <- n_attempts + 1
+      xml2::read_html(url)
+    },
+    error = function(e) {
+      warning(
+        paste0(
+          "Raised \n", e, "\nafter ", n_attempts, " ",
+          ifelse(n_attempts == 1, "attempt", "attempts"), " on URL ", url
+        )
+      )
 
-    url <- paste0(FBREF_HOSTNAME, path)
+      if (n_attempts > 3) {
+        print(Sys.time())
 
-    tryCatch(
-      {
-        n_attempts <- n_attempts + 1
-        xml2::read_html(url)
-      },
-      error = function(e) {
-        warning(
+        stop(
           paste0(
-            "Raised \n", e, "\nafter ", n_attempts, " ",
-            ifelse(n_attempts == 1, "attempt", "attempts"), " on URL ", url
+            "Stopped trying to scrape URL ", url,
+            " after ", n_attempts, " attempts."
           )
         )
-
-        if (n_attempts > 3) {
-          print(Sys.time())
-
-          stop(
-            paste0(
-              "Stopped trying to scrape URL ", url,
-              " after ", n_attempts, " attempts."
-            )
-          )
-        }
-
-        Sys.sleep(1)
-        fetch_html(path, n_attempts = n_attempts)
       }
-    )
+
+      Sys.sleep(1)
+      fetch_html(path, n_attempts = n_attempts)
+    }
+  )
+}
+
+scrape_player_links <- function(start_season, end_season) {
+  scrape_links <- function(
+    player_hrefs = NULL,
+    path = "/en/comps/9/stats/Premier-League-Stats",
+    should_scrape = FALSE
+  ) {
+    PLAYER_LINK_SELECTOR <- "#stats_player [data-stat='player'] a"
+    PREV_BUTTON_SELECTOR <- "a.button2.prev"
+    PAGE_HEADLINE_SELECTOR <- "h1[itemprop='name']"
+
+    page <- fetch_html(path)
+
+    page_headline <- page %>%
+      rvest::html_node(., PAGE_HEADLINE_SELECTOR) %>%
+      rvest::html_text(.)
+
+    # TODO: Checking start/end seasons as characters is error-prone,
+    # probably better to convert them to integers, then compare to the season
+    # numbers on the current page, but this is simpler and works well enough
+    # for now
+    if (is.na(page_headline)) {
+      should_navigate_to_previous_season <- FALSE
+      at_end_season <- FALSE
+    } else {
+      should_navigate_to_previous_season <- page_headline %>%
+        stringr::str_match(., start_season) %>%
+        is.na
+      at_end_season <- page_headline %>%
+          stringr::str_match(., end_season) %>%
+          is.character
+    }
+
+    should_scrape_this_season <- ifelse(should_scrape, TRUE, at_end_season)
+
+    if (should_scrape_this_season) {
+      this_page_player_hrefs <- page %>%
+        xml2::xml_find_all(., "//comment()") %>%
+        .[[grep("data-stat=\"player\"", .)]] %>%
+        rvest::html_text(.) %>%
+        stringr::str_replace_all(., "^\n[:space:]+|\n$", "") %>%
+        xml2::read_html(.) %>%
+        rvest::html_nodes(., PLAYER_LINK_SELECTOR) %>%
+        purrr::map(~ rvest::html_attr(., "href")) %>%
+        unlist
+    } else {
+      this_page_player_hrefs <- NULL
+    }
+
+    all_player_hrefs <- c(player_hrefs, this_page_player_hrefs) %>% unique
+    # We start at the current/most-recent season and work our way back
+    prev_season_path <- page %>%
+      rvest::html_node(., PREV_BUTTON_SELECTOR) %>%
+      rvest::html_attr(., "href")
+
+    if (should_navigate_to_previous_season && is.character(prev_season_path)) {
+      return(
+        scrape_links(
+          player_hrefs = all_player_hrefs,
+          path = prev_season_path,
+          should_scrape = should_scrape_this_season
+        )
+      )
+    }
+
+    all_player_hrefs
   }
+
+  scrape_links() %>%
+    purrr::map(~ paste0(FBREF_HOSTNAME, .)) %>%
+    unlist
+}
+
+scrape_player_stats <- function(player_urls) {
+  print(Sys.time())
 
   coerce_optional_col_to_numeric <- function(data_frame, col_name) {
     if (is.null(data_frame[[col_name]])) {
@@ -313,72 +381,6 @@ scrape_player_stats <- function(
     purrr::map2(match_paths, comp_names, ~ list(path = .x, competition = .y))
   }
 
-  scrape_player_links <- function(
-    player_hrefs = NULL,
-    path = "/en/comps/9/stats/Premier-League-Stats",
-    should_scrape = FALSE
-  ) {
-    PLAYER_LINK_SELECTOR <- "#stats_player [data-stat='player'] a"
-    PREV_BUTTON_SELECTOR <- "a.button2.prev"
-    PAGE_HEADLINE_SELECTOR <- "h1[itemprop='name']"
-
-    page <- fetch_html(path)
-
-    page_headline <- page %>%
-      rvest::html_node(., PAGE_HEADLINE_SELECTOR) %>%
-      rvest::html_text(.)
-
-    # TODO: Checking start/end seasons as characters is error-prone,
-    # probably better to convert them to integers, then compare to the season
-    # numbers on the current page, but this is simpler and works well enough
-    # for now
-    if (is.na(page_headline)) {
-      should_navigate_to_previous_season <- FALSE
-      at_end_season <- FALSE
-    } else {
-      should_navigate_to_previous_season <- page_headline %>%
-        stringr::str_match(., start_season) %>%
-        is.na
-      at_end_season <- page_headline %>%
-          stringr::str_match(., end_season) %>%
-          is.character
-    }
-
-    should_scrape_this_season <- ifelse(should_scrape, TRUE, at_end_season)
-
-    if (should_scrape_this_season) {
-      this_page_player_hrefs <- page %>%
-        xml2::xml_find_all(., "//comment()") %>%
-        .[[grep("data-stat=\"player\"", .)]] %>%
-        rvest::html_text(.) %>%
-        stringr::str_replace_all(., "^\n[:space:]+|\n$", "") %>%
-        xml2::read_html(.) %>%
-        rvest::html_nodes(., PLAYER_LINK_SELECTOR) %>%
-        purrr::map(~ rvest::html_attr(., "href")) %>%
-        unlist
-    } else {
-      this_page_player_hrefs <- NULL
-    }
-
-    all_player_hrefs <- c(player_hrefs, this_page_player_hrefs) %>% unique
-    # We start at the current/most-recent season and work our way back
-    prev_season_path <- page %>%
-      rvest::html_node(., PREV_BUTTON_SELECTOR) %>%
-      rvest::html_attr(., "href")
-
-    if (should_navigate_to_previous_season && is.character(prev_season_path)) {
-      return(
-        scrape_player_links(
-          player_hrefs = all_player_hrefs,
-          path = prev_season_path,
-          should_scrape = should_scrape_this_season
-        )
-      )
-    }
-
-    all_player_hrefs
-  }
-
   STATS_COL_FILL = list(
     HeightCm = 0,
     WeightKg = 0,
@@ -404,7 +406,7 @@ scrape_player_stats <- function(
     GoalkeepingSavePercentage = 0
   )
 
-  stats <- scrape_player_links() %>%
+  stats <- player_urls %>%
     purrr::map(~ scrape_individual_player_stats(.)) %>%
     unlist(., recursive = FALSE) %>%
     purrr::discard(is.null) %>%

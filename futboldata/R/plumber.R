@@ -9,11 +9,20 @@ function(name = "") {
     jsonlite::toJSON(.)
 }
 
-#' Fetch EPL player stats from fbref.com
+#' Fetch the URLs to individual player pages on fbref.com. Player lists
+#' are organized by season, but we deduplicate URLs for players
+#' who have played multiple seasons.
 #' @param start_season First season to scrape data for. Format: YYYY-YYYY.
 #' @param end_season Last season to scrape data for. Format: YYYY-YYYY.
-#' @get /player_stats
+#' @get /player_urls
 function(start_season, end_season) {
-  scrape_player_stats(start_season, end_season) %>%
-  jsonlite::toJSON(.)
+  scrape_player_links(start_season, end_season) %>%
+  list(data = .)
+}
+
+#' Fetch EPL player stats from fbref.com
+#' @param player_urls List of URLs to player pages.
+#' @get /player_stats
+function(player_urls) {
+  scrape_player_stats(player_urls)
 }

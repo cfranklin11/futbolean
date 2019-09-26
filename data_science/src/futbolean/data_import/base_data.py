@@ -9,10 +9,12 @@ LOCAL_AFL_DATA_SERVICE = "http://futbol_data:8080"
 
 
 def _handle_response_data(response: requests.Response) -> List[Dict[str, Any]]:
-    data = response.json()
+    parsed_response = response.json()
 
-    if isinstance(data, dict) and "error" in data.keys():
-        raise RuntimeError(data["error"])
+    if isinstance(parsed_response, dict) and "error" in parsed_response.keys():
+        raise RuntimeError(parsed_response["error"])
+
+    data = parsed_response.get("data")
 
     if any(data):
         return data

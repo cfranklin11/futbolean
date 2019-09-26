@@ -13,16 +13,7 @@ MODULE_SEPARATOR = "."
 class JSONRemoteDataSet(AbstractDataSet):
     """kedro data set based on fetching fresh data from the data service"""
 
-    def __init__(
-        self,
-        data_source: Union[Callable, str],
-        start_season: str,
-        end_season: str,
-        load_kwargs={},
-        **_kwargs,
-    ):
-        self._start_season = start_season
-        self._end_season = end_season
+    def __init__(self, data_source: Union[Callable, str], load_kwargs={}, **_kwargs):
         self._load_kwargs: Dict[str, Any] = load_kwargs
 
         if callable(data_source):
@@ -36,16 +27,10 @@ class JSONRemoteDataSet(AbstractDataSet):
             self.data_source = getattr(module, function_name)
 
     def _load(self) -> List[Dict[str, Any]]:
-        return self.data_source(
-            self._start_season, self._end_season, **self._load_kwargs
-        )
+        return self.data_source(**self._load_kwargs)
 
     def _save(self, data: pd.DataFrame) -> None:
         pass
 
     def _describe(self):
-        return {
-            "start_season": self._start_season,
-            "end_season": self._end_season,
-            **self._load_kwargs,
-        }
+        return self._load_kwargs
