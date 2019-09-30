@@ -13,8 +13,9 @@ fetch_html <- function(url, n_attempts = 0) {
     error = function(e) {
       warning(
         paste0(
-          "Raised \n", e, "\nafter ", n_attempts, " ",
-          ifelse(n_attempts == 1, "attempt", "attempts"), " on URL ", url
+          "Raised the following after ", n_attempts, " ",
+          ifelse(n_attempts == 1, "attempt", "attempts"), " on URL ", url,
+          "\n", e
         )
       )
 
@@ -29,7 +30,9 @@ fetch_html <- function(url, n_attempts = 0) {
         )
       }
 
-      Sys.sleep(10 * n_attempts)
+      Sys.sleep(20 * n_attempts)
+      closeAllConnections()
+      gc()
       fetch_html(url, n_attempts = n_attempts)
     }
   )
@@ -109,7 +112,7 @@ scrape_player_links <- function(start_season, end_season) {
 }
 
 scrape_player_stats <- function(player_urls) {
-  print(Sys.time())
+  print(paste0("Starting: ", Sys.time()))
 
   coerce_optional_col_to_numeric <- function(data_frame, col_name) {
     if (is.null(data_frame[[col_name]])) {
@@ -473,7 +476,7 @@ scrape_player_stats <- function(player_urls) {
     dplyr::mutate(., Comp = dplyr::coalesce(Comp, SeasonCompetition)) %>%
     dplyr::select(., -c("SeasonCompetition", "MatchReport"))
 
-  print(Sys.time())
+  print(paste0("Finished: ", Sys.time()))
 
   stats
 }

@@ -1,6 +1,7 @@
 """Base module for fetching data from afl_data service"""
 
 from typing import Dict, Any, List
+import time
 
 import requests
 
@@ -8,11 +9,17 @@ import requests
 LOCAL_AFL_DATA_SERVICE = "http://futbol_data:8080"
 
 
+class DataRequestError(Exception):
+    """Raised when data source returns an unsuccessful response"""
+
+
 def _handle_response_data(response: requests.Response) -> List[Dict[str, Any]]:
     parsed_response = response.json()
 
-    if isinstance(parsed_response, dict) and "error" in parsed_response.keys():
-        raise RuntimeError(parsed_response["error"])
+    error = parsed_response.get("error")
+
+    if error is not None and any(error):
+        raise DataRequestError(error)
 
     data = parsed_response.get("data")
 
@@ -32,9 +39,10 @@ def _make_request(
         # longer due to the container getting started, and it sometimes times out,
         # so we'll retry once just in case
         if retry:
+            time.sleep(10)
             _make_request(url, params=params, headers=headers, retry=False)
 
-        raise Exception(
+        raise RuntimeError(
             "Bad response from application: "
             f"{response.status_code} / {response.headers} / {response.text}"
         )

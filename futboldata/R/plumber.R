@@ -24,6 +24,17 @@ function(start_season, end_season) {
 #' @param player_urls List of URLs to player pages.
 #' @get /player_stats
 function(player_urls) {
-  scrape_player_stats(player_urls) %>%
-  list(data = .)
+  tryCatch(
+    {
+      scrape_player_stats(player_urls) %>%
+      list(data = .)
+    },
+    error = function(e) {
+      if(grepl("Stopped trying to scrape", e)) {
+        list(error = e)
+      } else {
+        stop(e)
+      }
+    }
+  )
 }

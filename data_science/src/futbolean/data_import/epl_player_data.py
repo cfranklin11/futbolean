@@ -5,10 +5,11 @@ import re
 import os
 import json
 import itertools
+from warnings import warn
 
 import numpy as np
 
-from futbolean.data_import.base_data import fetch_data
+from futbolean.data_import.base_data import fetch_data, DataRequestError
 from futbolean.settings import RAW_DATA_DIR
 
 # FBRef doesn't seem to have per-match player data before the 2014-2015 season.
@@ -22,7 +23,8 @@ LAST_COMPLETE_SEASON = "2018-2019"
 # per season equals 32,000 rows of data.
 # The size of these batches will likely increase with each new season, so I may
 # have to eventually reduce the number of players per batch.
-PLAYER_BATCH_SIZE = 200
+# PLAYER_BATCH_SIZE = 200
+PLAYER_BATCH_SIZE = 50
 
 
 def fetch_player_urls(
@@ -47,7 +49,7 @@ def fetch_player_urls(
     """
 
     if verbose == 1:
-        print("Fetching player URLs...")
+        print(f"Fetching player URLs from {start_season} to {end_season}...")
 
     data = fetch_data(
         "/player_urls", params={"start_season": start_season, "end_season": end_season}
@@ -97,13 +99,29 @@ def fetch_player_match_data(
             f"of roughly {PLAYER_BATCH_SIZE}..."
         )
 
-    data_batches = [
-        _fetch_player_match_data_batch(player_url_batch, idx, verbose=verbose)
-        for idx, player_url_batch in enumerate(player_url_batches)
-    ]
+    data_batches = []
+    idx = 0
+
+    for idx, player_url_batch in enumerate(player_url_batches):
+        try:
+            data_batches.append(
+                _fetch_player_match_data_batch(player_url_batch, idx, verbose=verbose)
+            )
+        except DataRequestError as error:
+            warn(
+                f"Tried to fetch a batch #{idx} of data, which begins with URL: "
+                f"{player_url_batch[0]}, but received the error below. "
+                f"Returning any data already fetched prior to the error.\n\n{error}"
+            )
+
+            # Assuming there aren't any bugs in the code (BIG assumption, I know),
+            # the error is likely from getting rate-limited by the site, so best to
+            # save what we have and try again later.
+            break
 
     if verbose == 1:
-        print("Player-match data received!")
+        batch_text = "batch" if idx == 0 else "batches"
+        print(f"Player-match data received for {idx + 1} {batch_text}!")
 
     return list(itertools.chain.from_iterable(data_batches))
 
