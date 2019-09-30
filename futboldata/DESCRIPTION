@@ -11,8 +11,9 @@ Encoding: UTF-8
 LazyData: true
 Imports:
     BH,
-    dplyr,
     devtools,
+    dplyr,
+    lubridate,
     plogr,
     plumber,
     progress,
@@ -25,6 +26,4 @@ Imports:
 Suggests:
     roxygen2,
     testthat,
-Remotes:
-    git@github.com:tidyverse/tidyr.git
 RoxygenNote: 6.1.1
