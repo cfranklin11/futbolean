@@ -10,10 +10,13 @@ skipped_match_urls <- NULL
 fetch_html <- function(url, n_attempts = 0) {
   tryCatch(
     {
+      Sys.sleep(floor(runif(100, min = 0, max = 6)))
       n_attempts <- n_attempts + 1
       xml2::read_html(url)
     },
     error = function(e) {
+      print(Sys.time())
+
       warning(
         paste0(
           "Raised the following after ", n_attempts, " ",
@@ -22,9 +25,7 @@ fetch_html <- function(url, n_attempts = 0) {
         )
       )
 
-      if (n_attempts > 3) {
-        print(Sys.time())
-
+      if (n_attempts > 2) {
         warning(
           paste0(
             "Skipping URL ", url, " after ", n_attempts, " scraping attempts."
