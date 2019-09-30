@@ -1,13 +1,16 @@
 """Module for fetching betting data from afl_data service"""
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, cast, Union
 import re
 import os
 import json
 import itertools
 from warnings import warn
+from datetime import date
+from functools import reduce
 
 import numpy as np
+from mypy_extensions import TypedDict
 
 from futbolean.data_import.base_data import fetch_data, DataRequestError
 from futbolean.settings import RAW_DATA_DIR
@@ -27,11 +30,21 @@ LAST_COMPLETE_SEASON = "2018-2019"
 PLAYER_BATCH_SIZE = 50
 
 
+PlayerData = TypedDict(
+    "PlayerData",
+    {
+        "data": List[Dict[str, Any]],
+        "skipped_player_urls": Union[List[str], str],
+        "skipped_match_urls": Union[List[str], str],
+    },
+)
+
+
 def fetch_player_urls(
     start_season: str = EARLIEST_SEASON_WITH_PLAYER_MATCH_DATA,
     end_season: str = LAST_COMPLETE_SEASON,
     verbose: int = 1,
-) -> List[Dict[str, Any]]:
+) -> PlayerData:
     """
     Get list of URLs for EPL player pages on fbref.com.
 
@@ -58,12 +71,12 @@ def fetch_player_urls(
     if verbose == 1:
         print("Player URLs received!")
 
-    return data
+    return cast(PlayerData, data["data"])
 
 
 def _fetch_player_match_data_batch(
     player_urls: List[str], idx: int, verbose: int = 1
-) -> List[Dict[str, Any]]:
+) -> PlayerData:
     if verbose == 1:
         print(f"Fetching player stats for batch {idx + 1}")
 
@@ -72,12 +85,12 @@ def _fetch_player_match_data_batch(
     if verbose == 1:
         print(f"Data for batch {idx + 1} received!")
 
-    return data
+    return cast(PlayerData, data["data"])
 
 
 def fetch_player_match_data(
     player_urls: List[str] = [], verbose: int = 1
-) -> List[Dict[str, Any]]:
+) -> PlayerData:
     """
     Get per-match player stats for EPL going back to the 2014-2015 season
 
@@ -123,7 +136,29 @@ def fetch_player_match_data(
         batch_text = "batch" if idx == 0 else "batches"
         print(f"Player-match data received for {idx + 1} {batch_text}!")
 
-    return list(itertools.chain.from_iterable(data_batches))
+    player_data = list(
+        itertools.chain.from_iterable(
+            [data_batch["data"] for data_batch in data_batches]
+        )
+    )
+
+    skipped_players = list(
+        itertools.chain.from_iterable(
+            [data_batch["skipped_player_urls"] for data_batch in data_batches]
+        )
+    )
+
+    skipped_matches = list(
+        itertools.chain.from_iterable(
+            [data_batch["skipped_match_urls"] for data_batch in data_batches]
+        )
+    )
+
+    return {
+        "data": player_data,
+        "skipped_player_urls": skipped_players,
+        "skipped_match_urls": skipped_matches,
+    }
 
 
 def save_player_urls(
@@ -148,12 +183,26 @@ def save_player_urls(
     """
 
     data = fetch_player_urls(start_season, end_season, verbose=verbose)
+    skipped_urls = data.get("skipped_player_urls")
+
+    skipped_label = ""
+
+    if skipped_urls is not None and any(skipped_urls):
+        skipped_label = "-skipped"
+
+        filepath = os.path.join(
+            RAW_DATA_DIR, f"skipped-epl-player-urls-{date.today()}.json"
+        )
+
+        with open(filepath, "w") as json_file:
+            json.dump(skipped_urls, json_file, indent=2)
+
     filepath = os.path.join(
-        RAW_DATA_DIR, f"epl-player-urls_{start_season}_{end_season}.json"
+        RAW_DATA_DIR, f"epl-player-urls_{start_season}_{end_season}{skipped_label}.json"
     )
 
     with open(filepath, "w") as json_file:
-        json.dump(data, json_file, indent=2)
+        json.dump(data["data"], json_file, indent=2)
 
     if verbose == 1:
         print("Player URLs saved")
@@ -182,19 +231,46 @@ def save_player_match_data(
         None
     """
 
-    seasons_match = re.search(r"\d{4}-\d{4}", player_url_filepath)
-    seasons_label = "" if seasons_match is None else f"_{seasons_match[0]}"
+    seasons_match = re.search(r"\d{4}-\d{4}_\d{4}-\d{4}", player_url_filepath)
+    seasons_label = "" if seasons_match is None else f"-{seasons_match[0]}"
 
     with open(player_url_filepath, "r") as url_file:
         player_urls = json.load(url_file)
 
     data = fetch_player_match_data(player_urls, verbose=verbose)
-    filepath = os.path.join(RAW_DATA_DIR, f"epl-player-match-data{seasons_label}.json")
+    skipped_players = data.get("skipped_player_urls")
+    skipped_matches = data.get("skipped_match_urls")
+
+    skipped_label = ""
+
+    if skipped_players and any(skipped_players):
+        skipped_label = "-skipped"
+
+        filepath = os.path.join(
+            RAW_DATA_DIR, f"skipped-epl-player-urls-{date.today()}.json"
+        )
+
+        with open(filepath, "w") as json_file:
+            json.dump(skipped_players, json_file, indent=2)
+
+    if skipped_matches and any(skipped_matches):
+        skipped_label = "-skipped"
+
+        filepath = os.path.join(
+            RAW_DATA_DIR, f"skipped-epl-player-match-urls-{date.today()}.json"
+        )
+
+        with open(filepath, "w") as json_file:
+            json.dump(skipped_matches, json_file, indent=2)
+
+    filepath = os.path.join(
+        RAW_DATA_DIR, f"epl-player-match-data{seasons_label}{skipped_label}.json"
+    )
 
     # Result columns have a weird UTF-8 dash in the string, so coercing to ASCII
     # results in weird encoding values
     with open(filepath, "w", encoding="utf8") as json_file:
-        json.dump(data, json_file, indent=2, ensure_ascii=False)
+        json.dump(data["data"], json_file, indent=2, ensure_ascii=False)
 
     if verbose == 1:
         print("Player match data saved")

@@ -4,6 +4,9 @@
 EARLIEST_SEASON_WITH_PLAYER_MATCH_DATA <- "2014-2015"
 FBREF_HOSTNAME = "https://fbref.com"
 
+skipped_player_urls <- NULL
+skipped_match_urls <- NULL
+
 fetch_html <- function(url, n_attempts = 0) {
   tryCatch(
     {
@@ -22,12 +25,27 @@ fetch_html <- function(url, n_attempts = 0) {
       if (n_attempts > 3) {
         print(Sys.time())
 
-        stop(
+        warning(
           paste0(
-            "Stopped trying to scrape URL ", url,
-            " after ", n_attempts, " attempts."
+            "Skipping URL ", url, " after ", n_attempts, " scraping attempts."
           )
         )
+
+        if (grepl("matchlogs", url)) {
+          assign(
+            "skipped_match_urls",
+            c(skipped_match_urls, url),
+            envir = .GlobalEnv
+          )
+        } else {
+          assign(
+            "skipped_player_urls",
+            c(skipped_player_urls, url),
+            envir = .GlobalEnv
+          )
+        }
+
+        return(NULL)
       }
 
       Sys.sleep(20 * n_attempts)
@@ -50,6 +68,10 @@ scrape_player_links <- function(start_season, end_season) {
 
     url <- paste0(FBREF_HOSTNAME, path)
     page <- fetch_html(url)
+
+    if (is.null(page)) {
+      return(NULL)
+    }
 
     page_headline <- page %>%
       rvest::html_node(., PAGE_HEADLINE_SELECTOR) %>%
@@ -106,9 +128,12 @@ scrape_player_links <- function(start_season, end_season) {
     all_player_hrefs
   }
 
-  scrape_links() %>%
+  player_urls = scrape_links() %>%
+    purrr::discard(is.null) %>%
     purrr::map(~ paste0(FBREF_HOSTNAME, .)) %>%
     unlist
+
+  list(data = player_urls, skipped_urls = unique(skipped_urls))
 }
 
 scrape_player_stats <- function(player_urls) {
@@ -334,6 +359,10 @@ scrape_player_stats <- function(player_urls) {
 
     page <- fetch_html(url)
 
+    if (is.null(page)) {
+      return(NULL)
+    }
+
     player_data_table <- scrape_player_stats(page, url)
     player_info <- scrape_player_info(page, competition_name)
 
@@ -353,6 +382,10 @@ scrape_player_stats <- function(player_urls) {
     DOMESTIC_COMPS_COMP_LINK_SELECTOR <- "#all_stats_player [data-stat='comp_level'] a"
 
     page <- fetch_html(url)
+
+    if (is.null(page)) {
+      return(NULL)
+    }
 
     match_urls <- page %>%
       rvest::html_nodes(., DOMESTIC_COMPS_MATCH_LINK_SELECTOR) %>%
@@ -478,5 +511,5 @@ scrape_player_stats <- function(player_urls) {
 
   print(paste0("Finished: ", Sys.time()))
 
-  stats
+  list(data = stats, skipped_urls = unique(skipped_urls))
 }

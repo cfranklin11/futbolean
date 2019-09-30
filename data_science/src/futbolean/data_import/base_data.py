@@ -1,6 +1,6 @@
 """Base module for fetching data from afl_data service"""
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Union
 import time
 
 import requests
@@ -13,7 +13,7 @@ class DataRequestError(Exception):
     """Raised when data source returns an unsuccessful response"""
 
 
-def _handle_response_data(response: requests.Response) -> List[Dict[str, Any]]:
+def _handle_response_data(response: requests.Response) -> Dict[str, Any]:
     parsed_response = response.json()
 
     error = parsed_response.get("error")
@@ -21,12 +21,7 @@ def _handle_response_data(response: requests.Response) -> List[Dict[str, Any]]:
     if error is not None and any(error):
         raise DataRequestError(error)
 
-    data = parsed_response.get("data")
-
-    if any(data):
-        return data
-
-    return []
+    return parsed_response
 
 
 def _make_request(
@@ -50,7 +45,7 @@ def _make_request(
     return response
 
 
-def fetch_data(path: str, params: Dict[str, Any] = {}) -> List[Dict[str, Any]]:
+def fetch_data(path: str, params: Dict[str, Any] = {}) -> Dict[str, Any]:
     """
     Fetch data from the afl_data service
 

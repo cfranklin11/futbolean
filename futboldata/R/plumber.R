@@ -16,8 +16,18 @@ function(name = "") {
 #' @param end_season Last season to scrape data for. Format: YYYY-YYYY.
 #' @get /player_urls
 function(start_season, end_season) {
-  scrape_player_links(start_season, end_season) %>%
-  list(data = .)
+  tryCatch(
+    {
+      scrape_player_links(start_season, end_season) %>%
+      list(data = ., error = NULL)
+    },
+    error = function(e) {
+      list(
+        data = list(data = NULL, skipped_player_urls = NULL, skipped_match_urls = NULL),
+        error = as.character(e)
+      )
+    }
+  )
 }
 
 #' Fetch EPL player stats from fbref.com
@@ -27,14 +37,13 @@ function(player_urls) {
   tryCatch(
     {
       scrape_player_stats(player_urls) %>%
-      list(data = .)
+      list(data = ., error = NULL)
     },
     error = function(e) {
-      if(grepl("Stopped trying to scrape", e)) {
-        list(error = e)
-      } else {
-        stop(e)
-      }
+      list(
+        data = list(data = NULL, skipped_player_urls = NULL, skipped_match_urls = NULL),
+        error = as.character(e)
+      )
     }
   )
 }
