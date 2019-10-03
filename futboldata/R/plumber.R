@@ -16,7 +16,7 @@ function(name = "") {
 #' @param end_season Last season to scrape data for. Format: YYYY-YYYY.
 #' @get /player_urls
 function(start_season, end_season) {
-  tryCatch(
+  tryCatchLog::tryCatchLog(
     {
       scrape_player_links(start_season, end_season) %>%
       list(data = ., error = NULL)
@@ -34,7 +34,7 @@ function(start_season, end_season) {
 #' @param player_urls List of URLs to player pages.
 #' @get /player_stats
 function(player_urls) {
-  tryCatch(
+  tryCatchLog::tryCatchLog(
     {
       scrape_player_stats(player_urls) %>%
       list(data = ., error = NULL)

@@ -18,11 +18,12 @@ Imports:
     plumber,
     progress,
     purrr,
-    readr
+    readr,
     rvest,
     stringr,
     tibble,
     tidyr,
+    tryCatchLog,
 Suggests:
     roxygen2,
     testthat,
