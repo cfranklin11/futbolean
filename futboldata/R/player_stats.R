@@ -10,7 +10,7 @@ skipped_match_urls <- NULL
 fetch_html <- function(url, n_attempts = 0) {
   tryCatch(
     {
-      Sys.sleep(floor(runif(100, min = 0, max = 6)))
+      Sys.sleep(floor(runif(1, min = 0, max = 6)))
       n_attempts <- n_attempts + 1
       xml2::read_html(url)
     },
@@ -134,7 +134,7 @@ scrape_player_links <- function(start_season, end_season) {
     purrr::map(~ paste0(FBREF_HOSTNAME, .)) %>%
     unlist
 
-  list(data = player_urls, skipped_urls = unique(skipped_urls))
+  list(data = player_urls, skipped_player_urls = unique(skipped_player_urls), skipped_match_urls = unique(skipped_match_urls))
 }
 
 scrape_player_stats <- function(player_urls) {
@@ -391,17 +391,17 @@ scrape_player_stats <- function(player_urls) {
     match_urls <- page %>%
       rvest::html_nodes(., DOMESTIC_COMPS_MATCH_LINK_SELECTOR) %>%
       purrr::map(~ rvest::html_attr(., "href")) %>%
-      unlist %>%
       # Match paths can be duplicated if a player played for two different teams
       # in one season
       unique %>%
-      purrr::map(~ paste0(FBREF_HOSTNAME, .))
+      purrr::map(~ paste0(FBREF_HOSTNAME, .)) %>%
+      unlist
 
     # Some older player pages don't have links to per-match data pages, so we
     # just skip them. This seems to only happen with players whose final season
     # was 2014-2015 (the first season with per-match data), but not sure if it
     # applies to all players like this or just some.
-    if (is.null(match_urls)) {
+    if (is.null(match_urls) || length(match_urls) == 0) {
       print(paste0(url, "didn't have any links to match data pages."))
       return(NULL)
     }
@@ -512,5 +512,9 @@ scrape_player_stats <- function(player_urls) {
 
   print(paste0("Finished: ", Sys.time()))
 
-  list(data = stats, skipped_urls = unique(skipped_urls))
+  list(
+    data = stats,
+    skipped_player_urls = unique(skipped_player_urls),
+    skipped_match_urls = unique(skipped_match_urls)
+  )
 }
