@@ -1,13 +1,12 @@
 """Module for fetching betting data from afl_data service"""
 
-from typing import List, Dict, Any, cast, Union
+from typing import List, Dict, Any, cast, Union, Optional
 import re
 import os
 import json
 import itertools
 from warnings import warn
 from datetime import date
-from functools import reduce
 
 import numpy as np
 from mypy_extensions import TypedDict
@@ -213,6 +212,7 @@ def save_player_urls(
 # as necessary
 def save_player_match_data(
     player_url_filepath: str = "data/01_raw/epl-player-urls_2014-2015_2018-2019.json",
+    starting_url: Optional[str] = None,
     verbose: int = 1,
 ) -> None:
     """
@@ -237,7 +237,12 @@ def save_player_match_data(
     with open(player_url_filepath, "r") as url_file:
         player_urls = json.load(url_file)
 
-    data = fetch_player_match_data(player_urls, verbose=verbose)
+    starting_index = (
+        player_urls.index(starting_url) if starting_url in player_urls else 0
+    )
+    data = fetch_player_match_data(player_urls[starting_index:], verbose=verbose)
+
+    player_data = data["data"]
     skipped_players = data.get("skipped_player_urls")
     skipped_matches = data.get("skipped_match_urls")
 
@@ -267,10 +272,15 @@ def save_player_match_data(
         RAW_DATA_DIR, f"epl-player-match-data{seasons_label}{skipped_label}.json"
     )
 
+    if os.path.isfile(filepath):
+        with open(filepath, "r", encoding="utf8") as json_file:
+            existing_player_data = json.load(json_file)
+            player_data.extend(existing_player_data)
+
     # Result columns have a weird UTF-8 dash in the string, so coercing to ASCII
     # results in weird encoding values
     with open(filepath, "w", encoding="utf8") as json_file:
-        json.dump(data["data"], json_file, indent=2, ensure_ascii=False)
+        json.dump(player_data, json_file, indent=2, ensure_ascii=False)
 
     if verbose == 1:
         print("Player match data saved")
