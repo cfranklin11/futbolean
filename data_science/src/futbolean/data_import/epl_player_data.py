@@ -102,13 +102,18 @@ def fetch_player_match_data(
     """
 
     n_urls = len(player_urls)
-    n_batches = round(n_urls / PLAYER_BATCH_SIZE)
-    player_url_batches = np.array_split(np.array(player_urls), n_batches)
+
+    if n_urls > PLAYER_BATCH_SIZE:
+        n_batches = round(n_urls / PLAYER_BATCH_SIZE)
+        player_url_batches = np.array_split(np.array(player_urls), n_batches)
+    else:
+        player_url_batches = [player_urls]
 
     if verbose == 1:
+        batch_size = len(player_url_batches[0])
         print(
             f"Fetching player-match data in {len(player_url_batches)} batches "
-            f"of roughly {PLAYER_BATCH_SIZE}..."
+            f"of roughly {batch_size} players each..."
         )
 
     data_batches = []
@@ -211,8 +216,9 @@ def save_player_urls(
 # the static, raw data up to the end of last season, fetching more recent data
 # as necessary
 def save_player_match_data(
-    player_url_filepath: str = "data/01_raw/epl-player-urls_2014-2015_2018-2019.json",
+    player_url_filename: str = "epl-player-urls_2014-2015_2018-2019.json",
     starting_url: Optional[str] = None,
+    skipped_only: bool = False,
     verbose: int = 1,
 ) -> None:
     """
@@ -231,11 +237,24 @@ def save_player_match_data(
         None
     """
 
-    seasons_match = re.search(r"\d{4}-\d{4}_\d{4}-\d{4}", player_url_filepath)
+    seasons_match = re.search(r"\d{4}-\d{4}_\d{4}-\d{4}", player_url_filename)
     seasons_label = "" if seasons_match is None else f"-{seasons_match[0]}"
+    player_url_filepath = os.path.join(RAW_DATA_DIR, player_url_filename)
+    skipped_player_url_filepath = os.path.join(
+        RAW_DATA_DIR, "skipped-epl-player-urls.json"
+    )
 
-    with open(player_url_filepath, "r") as url_file:
-        player_urls = json.load(url_file)
+    if skipped_only:
+        player_urls: List[str] = []
+    else:
+        with open(player_url_filepath, "r") as url_file:
+            player_urls = json.load(url_file)
+
+    if os.path.isfile(skipped_player_url_filepath):
+        with open(skipped_player_url_filepath, "r") as url_file:
+            skipped_player_urls = json.load(url_file)
+
+        player_urls.extend(skipped_player_urls)
 
     starting_index = (
         player_urls.index(starting_url) if starting_url in player_urls else 0
@@ -248,12 +267,12 @@ def save_player_match_data(
 
     skipped_label = ""
 
+    os.remove(skipped_player_url_filepath)
+
     if skipped_players and any(skipped_players):
         skipped_label = "-skipped"
 
-        filepath = os.path.join(
-            RAW_DATA_DIR, f"skipped-epl-player-urls-{date.today()}.json"
-        )
+        filepath = skipped_player_url_filepath
 
         with open(filepath, "w") as json_file:
             json.dump(skipped_players, json_file, indent=2)
@@ -261,9 +280,7 @@ def save_player_match_data(
     if skipped_matches and any(skipped_matches):
         skipped_label = "-skipped"
 
-        filepath = os.path.join(
-            RAW_DATA_DIR, f"skipped-epl-player-match-urls-{date.today()}.json"
-        )
+        filepath = os.path.join(RAW_DATA_DIR, f"skipped-epl-player-match-urls.json")
 
         with open(filepath, "w") as json_file:
             json.dump(skipped_matches, json_file, indent=2)
