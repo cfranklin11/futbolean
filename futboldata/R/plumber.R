@@ -23,7 +23,7 @@ function(start_season, end_season) {
     },
     error = function(e) {
       list(
-        data = list(data = NULL, skipped_player_urls = NULL, skipped_match_urls = NULL),
+        data = list(data = NULL, skipped_urls = NULL),
         error = as.character(e)
       )
     }
@@ -41,7 +41,7 @@ function(player_urls) {
     },
     error = function(e) {
       list(
-        data = list(data = NULL, skipped_player_urls = NULL, skipped_match_urls = NULL),
+        data = list(data = NULL, skipped_urls = NULL),
         error = as.character(e)
       )
     }

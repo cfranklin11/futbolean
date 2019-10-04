@@ -30,12 +30,7 @@ PLAYER_BATCH_SIZE = 50
 
 
 PlayerData = TypedDict(
-    "PlayerData",
-    {
-        "data": List[Dict[str, Any]],
-        "skipped_player_urls": Union[List[str], str],
-        "skipped_match_urls": Union[List[str], str],
-    },
+    "PlayerData", {"data": List[Dict[str, Any]], "skipped_urls": Union[List[str], str]}
 )
 
 
@@ -146,23 +141,13 @@ def fetch_player_match_data(
         )
     )
 
-    skipped_players = list(
+    skipped_urls = list(
         itertools.chain.from_iterable(
-            [data_batch["skipped_player_urls"] for data_batch in data_batches]
+            [data_batch["skipped_urls"] for data_batch in data_batches]
         )
     )
 
-    skipped_matches = list(
-        itertools.chain.from_iterable(
-            [data_batch["skipped_match_urls"] for data_batch in data_batches]
-        )
-    )
-
-    return {
-        "data": player_data,
-        "skipped_player_urls": skipped_players,
-        "skipped_match_urls": skipped_matches,
-    }
+    return {"data": player_data, "skipped_urls": skipped_urls}
 
 
 def save_player_urls(
@@ -187,7 +172,7 @@ def save_player_urls(
     """
 
     data = fetch_player_urls(start_season, end_season, verbose=verbose)
-    skipped_urls = data.get("skipped_player_urls")
+    skipped_urls = data.get("skipped_urls")
 
     skipped_label = ""
 
@@ -240,9 +225,7 @@ def save_player_match_data(
     seasons_match = re.search(r"\d{4}-\d{4}_\d{4}-\d{4}", player_url_filename)
     seasons_label = "" if seasons_match is None else f"-{seasons_match[0]}"
     player_url_filepath = os.path.join(RAW_DATA_DIR, player_url_filename)
-    skipped_player_url_filepath = os.path.join(
-        RAW_DATA_DIR, "skipped-epl-player-urls.json"
-    )
+    skipped_url_filepath = os.path.join(RAW_DATA_DIR, "skipped-epl-player-urls.json")
 
     if skipped_only:
         player_urls: List[str] = []
@@ -250,11 +233,11 @@ def save_player_match_data(
         with open(player_url_filepath, "r") as url_file:
             player_urls = json.load(url_file)
 
-    if os.path.isfile(skipped_player_url_filepath):
-        with open(skipped_player_url_filepath, "r") as url_file:
-            skipped_player_urls = json.load(url_file)
+    if os.path.isfile(skipped_url_filepath):
+        with open(skipped_url_filepath, "r") as url_file:
+            skipped_urls = json.load(url_file)
 
-        player_urls.extend(skipped_player_urls)
+        player_urls.extend(skipped_urls)
 
     starting_index = (
         player_urls.index(starting_url) if starting_url in player_urls else 0
@@ -262,28 +245,19 @@ def save_player_match_data(
     data = fetch_player_match_data(player_urls[starting_index:], verbose=verbose)
 
     player_data = data["data"]
-    skipped_players = data.get("skipped_player_urls")
-    skipped_matches = data.get("skipped_match_urls")
+    skipped_urls = data.get("skipped_urls")
 
     skipped_label = ""
 
-    os.remove(skipped_player_url_filepath)
+    os.remove(skipped_url_filepath)
 
-    if skipped_players and any(skipped_players):
+    if skipped_urls and any(skipped_urls):
         skipped_label = "-skipped"
 
-        filepath = skipped_player_url_filepath
+        filepath = skipped_url_filepath
 
         with open(filepath, "w") as json_file:
-            json.dump(skipped_players, json_file, indent=2)
-
-    if skipped_matches and any(skipped_matches):
-        skipped_label = "-skipped"
-
-        filepath = os.path.join(RAW_DATA_DIR, f"skipped-epl-player-match-urls.json")
-
-        with open(filepath, "w") as json_file:
-            json.dump(skipped_matches, json_file, indent=2)
+            json.dump(skipped_urls, json_file, indent=2)
 
     filepath = os.path.join(
         RAW_DATA_DIR, f"epl-player-match-data{seasons_label}{skipped_label}.json"

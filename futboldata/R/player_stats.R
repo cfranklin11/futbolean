@@ -2,10 +2,9 @@
 # We may want data aggregated by season, which goes back a bit futher,
 # eventually, but not for now
 EARLIEST_SEASON_WITH_PLAYER_MATCH_DATA <- "2014-2015"
-FBREF_HOSTNAME = "https://fbref.com"
+FBREF_HOSTNAME <- "https://fbref.com"
 
-skipped_player_urls <- NULL
-skipped_match_urls <- NULL
+skipped_urls <- NULL
 
 fetch_html <- function(url, n_attempts = 0) {
   tryCatch(
@@ -32,16 +31,12 @@ fetch_html <- function(url, n_attempts = 0) {
           )
         )
 
-        if (grepl("matchlogs", url)) {
+        # We don't save matchlog URLs, because it's easier to restart
+        # from the associated player's URL
+        if (!grepl("/matchlogs/", url)) {
           assign(
-            "skipped_match_urls",
-            c(skipped_match_urls, url),
-            envir = .GlobalEnv
-          )
-        } else {
-          assign(
-            "skipped_player_urls",
-            c(skipped_player_urls, url),
+            "skipped_urls",
+            c(skipped_urls, url),
             envir = .GlobalEnv
           )
         }
@@ -134,7 +129,7 @@ scrape_player_links <- function(start_season, end_season) {
     purrr::map(~ paste0(FBREF_HOSTNAME, .)) %>%
     unlist
 
-  list(data = player_urls, skipped_player_urls = unique(skipped_player_urls), skipped_match_urls = unique(skipped_match_urls))
+  list(data = player_urls, skipped_urls = unique(skipped_urls))
 }
 
 scrape_player_stats <- function(player_urls) {
@@ -146,6 +141,74 @@ scrape_player_stats <- function(player_urls) {
     }
 
     as.numeric(data_frame[[col_name]])
+  }
+
+  coerce_column_data_types <- function(data_frame) {
+    COERCE_INVALID_DATE_WARNING = "failed to parse"
+    COERCE_INVALID_NUMBERS_WARNING = "NAs introduced by coercion"
+
+    # Coercing columns results in major warning spam, and since the whole point
+    # of this is to generate NAs for invalid rows, we don't need to hear
+    # about it hundreds of times
+    withCallingHandlers(
+      dplyr::mutate(
+        data_frame,
+        Date = lubridate::as_date(Date),
+        HeightCm = as.numeric(HeightCm),
+        WeightKg = as.numeric(WeightKg),
+        Min = as.numeric(Min),
+        OffenseGls = as.numeric(OffenseGls),
+        OffenseAst = as.numeric(OffenseAst),
+        OffenseSh = as.numeric(OffenseSh),
+        OffenseSoT = as.numeric(OffenseSoT),
+        OffenseCrs = as.numeric(OffenseCrs),
+        OffenseFld = as.numeric(OffenseFld),
+        OffensePK = as.numeric(OffensePK),
+        OffensePKatt = as.numeric(OffensePKatt),
+        DefenseTkl = as.numeric(DefenseTkl),
+        DefenseInt = as.numeric(DefenseInt),
+        DefenseFls = as.numeric(DefenseFls),
+        DefenseCrdY = as.numeric(DefenseCrdY),
+        DefenseCrdR = as.numeric(DefenseCrdR),
+        GoalkeepingCS = coerce_optional_col_to_numeric(
+          data_frame, "GoalkeepingCS"
+        ),
+        GoalkeepingGA = coerce_optional_col_to_numeric(
+          data_frame, "GoalkeepingGA"
+        ),
+        GoalkeepingSaves = coerce_optional_col_to_numeric(
+          data_frame, "GoalkeepingSaves"
+        ),
+        GoalkeepingSoTA = coerce_optional_col_to_numeric(
+          data_frame, "GoalkeepingSoTA"
+        ),
+        GoalkeepingSavePercentage = coerce_optional_col_to_numeric(
+          data_frame, "GoalkeepingSavePercentage"
+        )
+      ),
+      warning = function(w) {
+        if (
+          grepl(COERCE_INVALID_DATE_WARNING, w$message) ||
+          grepl(COERCE_INVALID_NUMBERS_WARNING, w$message)
+        ) {
+          invokeRestart("muffleWarning")
+        }
+      }
+    )
+  }
+
+  nullify_partial_player_data <- function(player_data) {
+    data_frames <- player_data %>% purrr::map(~ .x[["data"]])
+    missing_data <- data_frames %>% purrr::detect(is.null)
+
+    if (is.null(missing_data)) {
+      return(data_frames)
+    }
+
+    player_url <- missing_data[["player_url"]]
+    assign("skipped_urls", c(skipped_urls, player_url), envir = .GlobalEnv)
+
+    list()
   }
 
   scrape_player_national_team <- function(player_info_fields, match_group_index) {
@@ -354,24 +417,25 @@ scrape_player_stats <- function(player_urls) {
     table_body
   }
 
-  scrape_individual_match_stats <- function(url_and_competition) {
-    url <- url_and_competition[["url"]]
-    competition_name <- url_and_competition[["competition"]]
-
-    page <- fetch_html(url)
+  scrape_individual_match_stats <- function(player_url, match_url, competition) {
+    page <- fetch_html(match_url)
 
     if (is.null(page)) {
-      return(NULL)
+      return(list(player_url = player_url, data = NULL))
     }
 
-    player_data_table <- scrape_player_stats(page, url)
+    player_data_table <- scrape_player_stats(page, match_url)
     player_info <- scrape_player_info(page, competition_name)
 
     if (is.null(player_data_table)) {
       return(NULL)
     }
 
-    do.call(tibble::add_column, c(list(.data = player_data_table), player_info))
+    data_frame <- do.call(
+      tibble::add_column, c(list(.data = player_data_table), player_info)
+    )
+
+    list(player_url = NULL, data = data_frame)
   }
 
   scrape_individual_player_stats <- function(url) {
@@ -415,7 +479,11 @@ scrape_player_stats <- function(player_urls) {
       purrr::map(~ rvest::html_text(.)) %>%
       unlist
 
-    purrr::map2(match_urls, comp_names, ~ list(url = .x, competition = .y))
+    purrr::map2(
+      match_urls,
+      comp_names,
+      ~ list(player_url = url, match_url = .x, competition = .y)
+    )
   }
 
   STATS_COL_FILL = list(
@@ -443,67 +511,15 @@ scrape_player_stats <- function(player_urls) {
     GoalkeepingSavePercentage = 0
   )
 
-  coerce_column_data_types <- function(data_frame) {
-    COERCE_INVALID_DATE_WARNING = "failed to parse"
-    COERCE_INVALID_NUMBERS_WARNING = "NAs introduced by coercion"
-
-    # Coercing columns results in major warning spam, and since the whole point
-    # of this is to generate NAs for invalid rows, we don't need to hear
-    # about it hundreds of times
-    withCallingHandlers(
-      dplyr::mutate(
-        data_frame,
-        Date = lubridate::as_date(Date),
-        HeightCm = as.numeric(HeightCm),
-        WeightKg = as.numeric(WeightKg),
-        Min = as.numeric(Min),
-        OffenseGls = as.numeric(OffenseGls),
-        OffenseAst = as.numeric(OffenseAst),
-        OffenseSh = as.numeric(OffenseSh),
-        OffenseSoT = as.numeric(OffenseSoT),
-        OffenseCrs = as.numeric(OffenseCrs),
-        OffenseFld = as.numeric(OffenseFld),
-        OffensePK = as.numeric(OffensePK),
-        OffensePKatt = as.numeric(OffensePKatt),
-        DefenseTkl = as.numeric(DefenseTkl),
-        DefenseInt = as.numeric(DefenseInt),
-        DefenseFls = as.numeric(DefenseFls),
-        DefenseCrdY = as.numeric(DefenseCrdY),
-        DefenseCrdR = as.numeric(DefenseCrdR),
-        GoalkeepingCS = coerce_optional_col_to_numeric(
-          data_frame, "GoalkeepingCS"
-        ),
-        GoalkeepingGA = coerce_optional_col_to_numeric(
-          data_frame, "GoalkeepingGA"
-        ),
-        GoalkeepingSaves = coerce_optional_col_to_numeric(
-          data_frame, "GoalkeepingSaves"
-        ),
-        GoalkeepingSoTA = coerce_optional_col_to_numeric(
-          data_frame, "GoalkeepingSoTA"
-        ),
-        GoalkeepingSavePercentage = coerce_optional_col_to_numeric(
-          data_frame, "GoalkeepingSavePercentage"
-        )
-      ),
-      warning = function(w) {
-        if (
-          grepl(COERCE_INVALID_DATE_WARNING, w$message) ||
-          grepl(COERCE_INVALID_NUMBERS_WARNING, w$message)
-        ) {
-          invokeRestart("muffleWarning")
-        }
-      }
-    )
-  }
-
   stats <- player_urls %>%
-    purrr::map(~ scrape_individual_player_stats(.)) %>%
+    purrr::map(scrape_individual_player_stats) %>%
+    purrr::discard(is.null) %>%
+    purrr::map_depth(., 2, ~ do.call(scrape_individual_match_stats, .)) %>%
+    purrr::discard(is.null) %>%
+    purrr::map(nullify_partial_player_data) %>%
     unlist(., recursive = FALSE) %>%
     purrr::discard(is.null) %>%
-    purrr::map(~ scrape_individual_match_stats(.)) %>%
-    purrr::discard(is.null) %>%
-    purrr::map(., coerce_column_data_types) %>%
+    purrr::map(coerce_column_data_types) %>%
     dplyr::bind_rows(.) %>%
     tidyr::drop_na(., Date) %>%
     tidyr::replace_na(., STATS_COL_FILL) %>%
@@ -514,7 +530,6 @@ scrape_player_stats <- function(player_urls) {
 
   list(
     data = stats,
-    skipped_player_urls = unique(skipped_player_urls),
-    skipped_match_urls = unique(skipped_match_urls)
+    skipped_urls = unique(skipped_urls),
   )
 }
