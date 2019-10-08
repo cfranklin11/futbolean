@@ -199,13 +199,14 @@ scrape_player_stats <- function(player_urls) {
 
   nullify_partial_player_data <- function(player_data) {
     data_frames <- player_data %>% purrr::map(~ .x[["data"]])
-    missing_data <- data_frames %>% purrr::detect(is.null)
+    first_missing_data_index <- data_frames %>% purrr::detect_index(is.null)
+    no_missing_data <- first_missing_data_index == 0
 
-    if (is.null(missing_data)) {
+    if (no_missing_data) {
       return(data_frames)
     }
 
-    player_url <- missing_data[["player_url"]]
+    player_url <- player_data[[first_missing_data_index]][["player_url"]]
     assign("skipped_urls", c(skipped_urls, player_url), envir = .GlobalEnv)
 
     list()
@@ -417,7 +418,11 @@ scrape_player_stats <- function(player_urls) {
     table_body
   }
 
-  scrape_individual_match_stats <- function(player_url, match_url, competition) {
+  scrape_individual_match_stats <- function(
+    player_url,
+    match_url,
+    competition_name
+  ) {
     page <- fetch_html(match_url)
 
     if (is.null(page)) {
@@ -435,7 +440,7 @@ scrape_player_stats <- function(player_urls) {
       tibble::add_column, c(list(.data = player_data_table), player_info)
     )
 
-    list(player_url = NULL, data = data_frame)
+    list(player_url = player_url, data = data_frame)
   }
 
   scrape_individual_player_stats <- function(url) {
@@ -530,6 +535,6 @@ scrape_player_stats <- function(player_urls) {
 
   list(
     data = stats,
-    skipped_urls = unique(skipped_urls),
+    skipped_urls = unique(skipped_urls)
   )
 }
