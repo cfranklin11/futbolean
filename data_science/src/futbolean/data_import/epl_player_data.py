@@ -1,6 +1,6 @@
 """Module for fetching betting data from afl_data service"""
 
-from typing import List, Dict, Any, cast, Union, Optional
+from typing import List, Dict, Any, cast, Union, Optional, Tuple
 import re
 import os
 import json
@@ -84,7 +84,7 @@ def _fetch_player_match_data_batch(
 
 def fetch_player_match_data(
     player_urls: List[str] = [], verbose: int = 1
-) -> PlayerData:
+) -> Tuple[PlayerData, Optional[int]]:
     """
     Get per-match player stats for EPL going back to the 2014-2015 season
 
@@ -113,6 +113,7 @@ def fetch_player_match_data(
 
     data_batches = []
     idx = 0
+    error_url_idx = None
 
     for idx, player_url_batch in enumerate(player_url_batches):
         try:
@@ -120,11 +121,14 @@ def fetch_player_match_data(
                 _fetch_player_match_data_batch(player_url_batch, idx, verbose=verbose)
             )
         except DataRequestError as error:
+            first_url_in_batch = player_url_batch[0]
             warn(
-                f"Tried to fetch a batch #{idx} of data, which begins with URL: "
-                f"{player_url_batch[0]}, but received the error below. "
+                f"Tried to fetch batch #{idx} of data, which begins with URL: "
+                f"{first_url_in_batch}, but received the error below. "
                 f"Returning any data already fetched prior to the error.\n\n{error}"
             )
+
+            error_url_idx = player_urls.index(first_url_in_batch)
 
             # Assuming there aren't any bugs in the code (BIG assumption, I know),
             # the error is likely from getting rate-limited by the site, so best to
@@ -147,7 +151,7 @@ def fetch_player_match_data(
         )
     )
 
-    return {"data": player_data, "skipped_urls": skipped_urls}
+    return {"data": player_data, "skipped_urls": skipped_urls}, error_url_idx
 
 
 def save_player_urls(
@@ -242,14 +246,26 @@ def save_player_match_data(
     starting_index = (
         player_urls.index(starting_url) if starting_url in player_urls else 0
     )
-    data = fetch_player_match_data(player_urls[starting_index:], verbose=verbose)
+    data, error_url_idx = fetch_player_match_data(
+        player_urls[starting_index:], verbose=verbose
+    )
 
     player_data = data["data"]
-    skipped_urls = data.get("skipped_urls")
+    new_skipped_urls = data["skipped_urls"]
+    urls_skipped_from_error = (
+        [] if error_url_idx is None else player_urls[error_url_idx:]
+    )
+
+    # We want to keep track of formerly-skipped URLs that we still haven't scraped
+    # due to some error as well as add any newly-skipped URLs
+    combined_skipped_urls = (set(skipped_urls) & set(urls_skipped_from_error)) | set(
+        new_skipped_urls
+    )
 
     skipped_label = ""
 
-    os.remove(skipped_url_filepath)
+    if os.path.isfile(skipped_url_filepath):
+        os.remove(skipped_url_filepath)
 
     if skipped_urls and any(skipped_urls):
         skipped_label = "-skipped"
@@ -257,7 +273,7 @@ def save_player_match_data(
         filepath = skipped_url_filepath
 
         with open(filepath, "w") as json_file:
-            json.dump(skipped_urls, json_file, indent=2)
+            json.dump(combined_skipped_urls, json_file, indent=2)
 
     filepath = os.path.join(
         RAW_DATA_DIR, f"epl-player-match-data{seasons_label}{skipped_label}.json"
