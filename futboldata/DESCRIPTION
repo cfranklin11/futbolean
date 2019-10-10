@@ -13,6 +13,7 @@ Imports:
     BH,
     devtools,
     dplyr,
+    futile.logger,
     lubridate,
     plogr,
     plumber,
