@@ -13,8 +13,10 @@ class TestJSONRemoteDataSet(TestCase):
         self.data_source = MagicMock()
         self.data_set = JSONRemoteDataSet(
             data_source=self.data_source,
-            start_season=self.start_season,
-            end_season=self.end_season,
+            load_kwargs={
+                "start_season": self.start_season,
+                "end_season": self.end_season,
+            },
         )
 
     def test_load(self):
@@ -31,8 +33,10 @@ class TestJSONRemoteDataSet(TestCase):
 
             with patch(data_source_path):
                 data_set = JSONRemoteDataSet(
-                    start_season="2015-2016",
-                    end_season="2017-2018",
+                    load_kwargs={
+                        "start_season": "2015-2016",
+                        "end_season": "2017-2018",
+                    },
                     data_source=data_source_path,
                 )
 

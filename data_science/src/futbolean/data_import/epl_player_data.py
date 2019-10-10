@@ -178,11 +178,7 @@ def save_player_urls(
     data = fetch_player_urls(start_season, end_season, verbose=verbose)
     skipped_urls = data.get("skipped_urls")
 
-    skipped_label = ""
-
     if skipped_urls is not None and any(skipped_urls):
-        skipped_label = "-skipped"
-
         filepath = os.path.join(
             RAW_DATA_DIR, f"skipped-epl-player-urls-{date.today()}.json"
         )
@@ -191,7 +187,7 @@ def save_player_urls(
             json.dump(skipped_urls, json_file, indent=2)
 
     filepath = os.path.join(
-        RAW_DATA_DIR, f"epl-player-urls_{start_season}_{end_season}{skipped_label}.json"
+        RAW_DATA_DIR, f"epl-player-urls-{start_season}-to-{end_season}.json"
     )
 
     with open(filepath, "w") as json_file:
@@ -205,7 +201,12 @@ def save_player_urls(
 # the static, raw data up to the end of last season, fetching more recent data
 # as necessary
 def save_player_match_data(
-    player_url_filename: str = "epl-player-urls_2014-2015_2018-2019.json",
+    player_url_filepath: str = os.path.join(
+        RAW_DATA_DIR, "epl-player-urls-2014-2015-to-2018-2019.json"
+    ),
+    skipped_url_filepath: str = os.path.join(
+        RAW_DATA_DIR, "skipped-epl-player-urls.json"
+    ),
     starting_url: Optional[str] = None,
     skipped_only: bool = False,
     verbose: int = 1,
@@ -226,10 +227,8 @@ def save_player_match_data(
         None
     """
 
-    seasons_match = re.search(r"\d{4}-\d{4}_\d{4}-\d{4}", player_url_filename)
+    seasons_match = re.search(r"\d{4}-\d{4}-to-\d{4}-\d{4}", player_url_filepath)
     seasons_label = "" if seasons_match is None else f"-{seasons_match[0]}"
-    player_url_filepath = os.path.join(RAW_DATA_DIR, player_url_filename)
-    skipped_url_filepath = os.path.join(RAW_DATA_DIR, "skipped-epl-player-urls.json")
 
     if skipped_only:
         player_urls: List[str] = []
@@ -273,9 +272,7 @@ def save_player_match_data(
         with open(filepath, "w") as json_file:
             json.dump(list(combined_skipped_urls), json_file, indent=2)
 
-    filepath = os.path.join(
-        RAW_DATA_DIR, f"epl-player-match-data{seasons_label}.json"
-    )
+    filepath = os.path.join(RAW_DATA_DIR, f"epl-player-match-data{seasons_label}.json")
 
     if os.path.isfile(filepath):
         with open(filepath, "r", encoding="utf8") as json_file:
