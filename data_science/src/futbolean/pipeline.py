@@ -53,6 +53,7 @@ def create_pipeline(**_kwargs):
                     "european_countries",
                     "european_teams",
                     "european_team_attributes",
+                    "epl_player_matches",
                 ],
                 "data",
             )

@@ -33,12 +33,13 @@ european_team_attributes:
 remote_epl_player_urls:
   type: futbolean.io.JSONRemoteDataSet
   data_source: "futbolean.data_import.epl_player_data.fetch_player_urls"
-  start_season: 2014-2015
-  end_season: 2018-2019
+  load_kwargs:
+    start_season: 2014-2015
+    end_season: 2018-2019
 
 epl_player_urls:
   type: JSONLocalDataSet
-  filepath: data/01_raw/epl-player-urls_2014-2015_2018-2019.json
+  filepath: data/01_raw/epl-player-urls-2014-2015-to-2018-2019.json
 
 remote_epl_player_matches:
   type: futbolean.io.JSONRemoteDataSet
@@ -46,4 +47,4 @@ remote_epl_player_matches:
 
 epl_player_matches:
   type: JSONLocalDataSet
-  filepath: data/01_raw/epl-player-match-data_2014-2015_2018-2019.json
+  filepath: data/01_raw/epl-player-match-data-2014-2015-to-2018-2019.json
