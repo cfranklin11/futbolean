@@ -11,22 +11,21 @@ Encoding: UTF-8
 LazyData: true
 Imports:
     BH,
-    binman,
-    dplyr,
     devtools,
+    dplyr,
+    futile.logger,
+    lubridate,
     plogr,
     plumber,
     progress,
     purrr,
-    RSelenium,
-    readr
+    readr,
     rvest,
     stringr,
+    tibble,
     tidyr,
-    wdman
+    tryCatchLog,
 Suggests:
     roxygen2,
     testthat,
-Remotes:
-    git@github.com:tidyverse/tidyr.git
 RoxygenNote: 6.1.1

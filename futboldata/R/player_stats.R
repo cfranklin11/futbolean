@@ -1,29 +1,145 @@
-require(RSelenium)
+# FBRef doesn't seem to have per-match player data before the 2014-2015 season.
+# We may want data aggregated by season, which goes back a bit futher,
+# eventually, but not for now
+EARLIEST_SEASON_WITH_PLAYER_MATCH_DATA <- "2014-2015"
+FBREF_HOSTNAME <- "https://fbref.com"
 
-scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox")) {
-  print(Sys.time())
-  # RSelenium silently fails when you tell it to navigate to a junk URL,
-  # staying on the same page and resulting in a difficult-to-understand error
-  # getting raised later
-  assert_browser_at_navigated_url <- function(browser, url) {
-    current_url <- browser$getCurrentUrl()
+skipped_urls <- NULL
 
-    if (current_url == url) {
-      return()
+fetch_html <- function(url, n_attempts = 0) {
+  # Using tryCatch here instead of tryCatchLog, because we're catching
+  # random errors thrown by the server, not bugs in our code,
+  # so there's no need to log them, but we still want to see
+  # the warning messages without a stack trace.
+  tryCatch(
+    {
+      Sys.sleep(floor(runif(1, min = 0, max = 6)))
+      n_attempts <- n_attempts + 1
+      xml2::read_html(url)
+    },
+    error = function(e) {
+      print(Sys.time())
+
+      warning(
+        paste0(
+          "Raised the following after ", n_attempts, " ",
+          ifelse(n_attempts == 1, "attempt", "attempts"), " on URL ", url,
+          "\n", e
+        )
+      )
+
+      if (n_attempts > 2) {
+        warning(
+          paste0(
+            "Skipping URL ", url, " after ", n_attempts, " scraping attempts."
+          )
+        )
+
+        # We don't save matchlog URLs, because it's easier to restart
+        # from the associated player's URL
+        if (!grepl("/matchlogs/", url)) {
+          assign(
+            "skipped_urls",
+            c(skipped_urls, url),
+            envir = .GlobalEnv
+          )
+        }
+
+        return(NULL)
+      }
+
+      Sys.sleep(20 * n_attempts)
+      closeAllConnections()
+      gc()
+      fetch_html(url, n_attempts = n_attempts)
+    },
+    include.full.call.stack = FALSE,
+    include.compact.call.stack = FALSE
+  )
+}
+
+scrape_player_links <- function(start_season, end_season) {
+  scrape_links <- function(
+    player_hrefs = NULL,
+    path = "/en/comps/9/stats/Premier-League-Stats",
+    should_scrape = FALSE
+  ) {
+    PLAYER_LINK_SELECTOR <- "#stats_player [data-stat='player'] a"
+    PREV_BUTTON_SELECTOR <- "a.button2.prev"
+    PAGE_HEADLINE_SELECTOR <- "h1[itemprop='name']"
+
+    url <- paste0(FBREF_HOSTNAME, path)
+    page <- fetch_html(url)
+
+    if (is.null(page)) {
+      return(NULL)
     }
 
-    # Sometimes the source of the bug is passing a vector or list as the URL,
-    # which we want to collapse for a readable error message; otherwise,
-    # paste0 iterates over it
-    invalid_url <- paste0(url, collapse = ", ")
+    page_headline <- page %>%
+      rvest::html_node(., PAGE_HEADLINE_SELECTOR) %>%
+      rvest::html_text(.)
 
-    stop(
-      paste0(
-        "Expected current URL to be ", invalid_url, ",\n",
-        "but instead the browser is at ", current_url
+    # TODO: Checking start/end seasons as characters is error-prone,
+    # probably better to convert them to integers, then compare to the season
+    # numbers on the current page, but this is simpler and works well enough
+    # for now
+    if (is.na(page_headline)) {
+      should_navigate_to_previous_season <- FALSE
+      at_end_season <- FALSE
+    } else {
+      should_navigate_to_previous_season <- page_headline %>%
+        stringr::str_match(., start_season) %>%
+        is.na
+      at_end_season <- page_headline %>%
+          stringr::str_match(., end_season) %>%
+          is.character
+    }
+
+    should_scrape_this_season <- ifelse(should_scrape, TRUE, at_end_season)
+
+    if (should_scrape_this_season) {
+      this_page_player_hrefs <- page %>%
+        xml2::xml_find_all(., "//comment()") %>%
+        .[[grep("data-stat=\"player\"", .)]] %>%
+        rvest::html_text(.) %>%
+        stringr::str_replace_all(., "^\n[:space:]+|\n$", "") %>%
+        xml2::read_html(.) %>%
+        rvest::html_nodes(., PLAYER_LINK_SELECTOR) %>%
+        purrr::map(~ rvest::html_attr(., "href")) %>%
+        unlist
+    } else {
+      this_page_player_hrefs <- NULL
+    }
+
+    all_player_hrefs <- c(player_hrefs, this_page_player_hrefs) %>% unique
+    # We start at the current/most-recent season and work our way back
+    prev_season_path <- page %>%
+      rvest::html_node(., PREV_BUTTON_SELECTOR) %>%
+      rvest::html_attr(., "href")
+
+    if (should_navigate_to_previous_season && is.character(prev_season_path)) {
+      return(
+        scrape_links(
+          player_hrefs = all_player_hrefs,
+          path = prev_season_path,
+          should_scrape = should_scrape_this_season
+        )
       )
-    )
+    }
+
+    all_player_hrefs
   }
+
+  player_urls = scrape_links() %>%
+    purrr::discard(is.null) %>%
+    purrr::map(~ paste0(FBREF_HOSTNAME, .)) %>%
+    unlist
+
+  list(data = player_urls, skipped_urls = unique(skipped_urls))
+}
+
+scrape_player_stats <- function(player_urls) {
+  print(paste0("Starting: ", Sys.time()))
 
   coerce_optional_col_to_numeric <- function(data_frame, col_name) {
     if (is.null(data_frame[[col_name]])) {
@@ -33,36 +149,73 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
     as.numeric(data_frame[[col_name]])
   }
 
-  get_href <- function(link_element) {
-    link_element$getElementAttribute("href")
+  coerce_column_data_types <- function(data_frame) {
+    COERCE_INVALID_DATE_WARNING = "failed to parse"
+    COERCE_INVALID_NUMBERS_WARNING = "NAs introduced by coercion"
+
+    # Coercing columns results in major warning spam, and since the whole point
+    # of this is to generate NAs for invalid rows, we don't need to hear
+    # about it hundreds of times
+    withCallingHandlers(
+      dplyr::mutate(
+        data_frame,
+        Date = lubridate::as_date(Date),
+        HeightCm = as.numeric(HeightCm),
+        WeightKg = as.numeric(WeightKg),
+        Min = as.numeric(Min),
+        OffenseGls = as.numeric(OffenseGls),
+        OffenseAst = as.numeric(OffenseAst),
+        OffenseSh = as.numeric(OffenseSh),
+        OffenseSoT = as.numeric(OffenseSoT),
+        OffenseCrs = as.numeric(OffenseCrs),
+        OffenseFld = as.numeric(OffenseFld),
+        OffensePK = as.numeric(OffensePK),
+        OffensePKatt = as.numeric(OffensePKatt),
+        DefenseTkl = as.numeric(DefenseTkl),
+        DefenseInt = as.numeric(DefenseInt),
+        DefenseFls = as.numeric(DefenseFls),
+        DefenseCrdY = as.numeric(DefenseCrdY),
+        DefenseCrdR = as.numeric(DefenseCrdR),
+        GoalkeepingCS = coerce_optional_col_to_numeric(
+          data_frame, "GoalkeepingCS"
+        ),
+        GoalkeepingGA = coerce_optional_col_to_numeric(
+          data_frame, "GoalkeepingGA"
+        ),
+        GoalkeepingSaves = coerce_optional_col_to_numeric(
+          data_frame, "GoalkeepingSaves"
+        ),
+        GoalkeepingSoTA = coerce_optional_col_to_numeric(
+          data_frame, "GoalkeepingSoTA"
+        ),
+        GoalkeepingSavePercentage = coerce_optional_col_to_numeric(
+          data_frame, "GoalkeepingSavePercentage"
+        )
+      ),
+      warning = function(w) {
+        if (
+          grepl(COERCE_INVALID_DATE_WARNING, w$message) ||
+          grepl(COERCE_INVALID_NUMBERS_WARNING, w$message)
+        ) {
+          invokeRestart("muffleWarning")
+        }
+      }
+    )
   }
 
-  clean_csv_strings <- function(player_info, csv_string) {
-    N_HEADER_ROWS = 2
+  nullify_partial_player_data <- function(player_data) {
+    data_frames <- player_data %>% purrr::map(~ .x[["data"]])
+    first_missing_data_index <- data_frames %>% purrr::detect_index(is.null)
+    no_missing_data <- first_missing_data_index == 0
 
-    csv_rows <- csv_string %>%
-      stringr::str_split(., "\n") %>%
-      unlist
+    if (no_missing_data) {
+      return(data_frames)
+    }
 
-    csv_header_row <- csv_rows[1:N_HEADER_ROWS] %>%
-      purrr::map(~ stringr::str_split(., ",")) %>%
-      purrr::pmap(paste0) %>%
-      unlist %>%
-      c(player_info[["player_cols"]], .) %>%
-      paste0(., collapse = ",") %>%
-      # I don't really like how spaces look in col labels, and most of the labels
-      # are in pascal case anyway
-      stringr::str_replace_all(., " ", "") %>%
-      stringr::str_replace_all(., "%", "Percentage")
+    player_url <- player_data[[first_missing_data_index]][["player_url"]]
+    assign("skipped_urls", c(skipped_urls, player_url), envir = .GlobalEnv)
 
-    non_table_values <- c(player_info[["player_values"]])
-    player_values <- paste0(non_table_values, collapse = ",")
-
-    csv_body_rows <-  csv_rows[(N_HEADER_ROWS + 1):length(csv_rows)] %>%
-      purrr::map(~ paste0(player_values, ",", .)) %>%
-      unlist
-
-    paste0(c(csv_header_row, csv_body_rows), collapse = "\n")
+    list()
   }
 
   scrape_player_national_team <- function(player_info_fields, match_group_index) {
@@ -176,7 +329,7 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
       stringr::str_replace_all(., ", ", "-")
   }
 
-  scrape_player_info <- function(browser, competition_name) {
+  scrape_player_info <- function(page, competition_name) {
     PLAYER_NAME_SELECTOR <- "h1[itemprop='name']"
     PLAYER_INFO_SELECTOR <- "[itemtype='https://schema.org/Person'] p"
     MATCH_GROUP_INDEX <- 2
@@ -190,10 +343,10 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
       "SeasonCompetition"
     )
 
-    player_name <- browser$findElement(using = "css", PLAYER_NAME_SELECTOR)$getElementText()
+    player_name <- rvest::html_node(page, PLAYER_NAME_SELECTOR) %>% rvest::html_text(.)
 
-    player_info_fields <- browser$findElements(using = "css", PLAYER_INFO_SELECTOR) %>%
-      purrr::map(~ .$getElementText()) %>%
+    player_info_fields <- rvest::html_nodes(page, PLAYER_INFO_SELECTOR) %>%
+      purrr::map(rvest::html_text) %>%
       unlist
 
     player_position <- scrape_player_position(player_info_fields, MATCH_GROUP_INDEX)
@@ -216,42 +369,87 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
       purrr::map(~ stringr::str_replace_all(., ",", "")) %>%
       unlist
 
-    list(player_values = clean_player_values, player_cols = PLAYER_INFO_COLS)
+    setNames(as.list(clean_player_values), PLAYER_INFO_COLS)
   }
 
-  scrape_individual_match_stats <- function(browser, url_comp) {
+  extract_header_cell_text <- function(header_cell) {
+    cell_colspan <- rvest::html_attr(header_cell, "colspan")
+    cell_text <- rvest::html_text(header_cell) %>%
+      # I don't really like how spaces look in col labels, and most of the labels
+      # are in pascal case anyway
+      stringr::str_replace_all(., " ", "") %>%
+      stringr::str_replace_all(., "%", "Percentage")
+
+    if (is.na(cell_colspan)) {
+      return(cell_text)
+    }
+
+    rep(cell_text, as.numeric(cell_colspan))
+  }
+
+  scrape_player_stats <- function(page, path) {
+    N_HEADER_ROWS <- 2
+
     # FBRef will display up to 3 data tables, separated by competiton:
     # 1. #ks_matchlogs_all = All competitions
     # 2. #ks_matchlogs_<4-digit number> = Domestic league competition
     # 3. #ks_matchologs_<4-digit number> = International competition (if available)
-    # None of these is guaranteed to appear, so the selector must be flexible
-    TO_CSV_BUTTON_SELECTOR <- paste0(
-      "div[id^=all_ks_matchlogs_] .section_heading_text .hasmore li:nth-child(4) button"
-    )
-    CSV_ELEMENT_SELECTOR <- "pre[id^=csv_ks_matchlogs_]"
+    # None of these is guaranteed to appear, so the selector must be flexible.
+    DATA_TABLE_SELECTOR <- "table[id^=ks_matchlogs_]"
 
-    url <- url_comp[["url"]]
-    browser$navigate(url)
-    assert_browser_at_navigated_url(browser, url)
+    # We always want the first data table, because it is for "All competitions"
+    # when available and the relevant domestic competition when not.
+    html_table <- page %>% rvest::html_node(., DATA_TABLE_SELECTOR)
 
-    # Need to execute JS to click the button because calling $clickElement()
-    # on the webElement object doesn't do anything. The selector is probably
-    # more specific than it needs to be, but there are lots of tables
-    # on these pages with similar markup, so there's a high risk
-    # of accidentally querying for more than one intends.
-    browser$executeScript(
-      paste0(
-        "document.querySelector('", TO_CSV_BUTTON_SELECTOR, "').click()"
-      )
-    )
+    # Some pages are missing match data tables
+    if (is.na(html_table)) {
+      print(paste0(path, " didn't have a match data table"))
+      return(NULL)
+    }
 
-    csv_element <- browser$findElement(using = "css", CSV_ELEMENT_SELECTOR)
-    player_info <- scrape_player_info(browser, url_comp[["comp"]])
+    table_header <- html_table %>%
+      rvest::html_nodes(., "thead tr") %>%
+        purrr::map(~ rvest::html_nodes(., "th")) %>%
+        purrr::map_depth(., 2, extract_header_cell_text) %>%
+        purrr::map(unlist) %>%
+        purrr::pmap(paste0) %>%
+        unlist
 
-    clean_csv_strings(player_info, csv_element$getElementText())
+    table_body <- html_table %>%
+      rvest::html_table(., fill = TRUE, header = FALSE) %>%
+      dplyr::slice(., (N_HEADER_ROWS + 1):length(.))
+
+    colnames(table_body) <- table_header
+
+    table_body
   }
 
-  scrape_individual_player_stats <- function(browser, url) {
+  scrape_individual_match_stats <- function(
+    player_url,
+    match_url,
+    competition_name
+  ) {
+    page <- fetch_html(match_url)
+
+    if (is.null(page)) {
+      return(list(player_url = player_url, data = NULL))
+    }
+
+    player_data_table <- scrape_player_stats(page, match_url)
+    player_info <- scrape_player_info(page, competition_name)
+
+    if (is.null(player_data_table)) {
+      return(NULL)
+    }
+
+    data_frame <- do.call(
+      tibble::add_column, c(list(.data = player_data_table), player_info)
+    )
+
+    list(player_url = player_url, data = data_frame)
+  }
+
+  scrape_individual_player_stats <- function(url) {
     # Selecting domestic league matches only, because players don't always have
     # matches in international competitions (e.g. Champions League),
     # and I want to keep it relatively simple & consistent for now.
@@ -259,79 +457,44 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
     DOMESTIC_COMPS_MATCH_LINK_SELECTOR <- "#all_stats_player [data-stat='matches'] a"
     DOMESTIC_COMPS_COMP_LINK_SELECTOR <- "#all_stats_player [data-stat='comp_level'] a"
 
-    browser$navigate(url)
-    assert_browser_at_navigated_url(browser, url)
+    page <- fetch_html(url)
 
-    match_urls <- browser$findElements(
-      using = "css", DOMESTIC_COMPS_MATCH_LINK_SELECTOR
-    ) %>%
-      purrr::map(get_href) %>%
-      unlist %>%
-      # Match URLs can be duplicated if a player played for two different teams
+    if (is.null(page)) {
+      return(NULL)
+    }
+
+    match_urls <- page %>%
+      rvest::html_nodes(., DOMESTIC_COMPS_MATCH_LINK_SELECTOR) %>%
+      purrr::map(~ rvest::html_attr(., "href")) %>%
+      # Match paths can be duplicated if a player played for two different teams
       # in one season
-      unique
+      unique %>%
+      purrr::map(~ paste0(FBREF_HOSTNAME, .)) %>%
+      unlist
 
     # Some older player pages don't have links to per-match data pages, so we
     # just skip them. This seems to only happen with players whose final season
     # was 2014-2015 (the first season with per-match data), but not sure if it
     # applies to all players like this or just some.
-    if (is.null(match_urls)) {
+    if (is.null(match_urls) || length(match_urls) == 0) {
+      print(paste0(url, "didn't have any links to match data pages."))
       return(NULL)
     }
 
-    comp_elements <- browser$findElements(
-      using = "css", DOMESTIC_COMPS_COMP_LINK_SELECTOR
+    comp_names <- page %>%
+      rvest::html_nodes(., DOMESTIC_COMPS_COMP_LINK_SELECTOR) %>%
+      # There will often be more rows with competition values than rows with
+      # links to per-match data pages, so we take the last n rows, where
+      # n = number of rows with matches links
+      .[(length(.) - length(match_urls) + 1):length(.)] %>%
+      purrr::map(~ rvest::html_text(.)) %>%
+      unlist
+
+    purrr::map2(
+      match_urls,
+      comp_names,
+      ~ list(player_url = url, match_url = .x, competition = .y)
     )
-
-    comp_names <- comp_elements[(length(comp_elements) - length(match_urls) + 1):length(comp_elements)] %>%
-      purrr::map(~ .$getElementText()) %>%
-      unlist
-
-    purrr::map2(match_urls, comp_names, ~ list(url = .x, comp = .y))
-  }
-
-  scrape_player_links <- function(
-    browser,
-    player_hrefs = NULL,
-    url = "https://fbref.com/en/comps/9/stats/Premier-League-Stats"
-  ) {
-    PLAYER_LINK_SELECTOR <- "#stats_player [data-stat='player'] a"
-    PREV_BUTTON_SELECTOR <- "a.button2.prev"
-    PAGE_HEADLINE_SELECTOR <- "h1[itemprop='name'"
-    # FBRef doesn't seem to have per-match player data before the 2014-2015 season.
-    # We may want data aggregated by season, which goes back a bit futher,
-    # eventually, but not for now
-    EARLIEST_SEASON_WITH_PLAYER_MATCH_DATA <- "2014-2015"
-
-    browser$navigate(url)
-    assert_browser_at_navigated_url(browser, url)
-
-    this_page_player_hrefs <- browser$findElements(using = "css", PLAYER_LINK_SELECTOR) %>%
-      purrr::map(get_href) %>%
-      unlist
-
-    if (is.null(player_hrefs)) {
-      all_player_hrefs <- this_page_player_hrefs
-    } else {
-      all_player_hrefs <- c(player_hrefs, this_page_player_hrefs) %>% unique
-    }
-
-    headline <- browser$findElement(using = "css", PAGE_HEADLINE_SELECTOR)$getElementText()
-
-    should_scrape_previous_season <- stringr::str_match(
-      headline,
-      EARLIEST_SEASON_WITH_PLAYER_MATCH_DATA
-    ) %>% is.na
-
-    if (should_scrape_previous_season) {
-      prev_season_url <- browser$findElement(using = "css", PREV_BUTTON_SELECTOR) %>%
-        get_href %>%
-        unlist
-
-      return(scrape_player_links(browser, all_player_hrefs, prev_season_url))
-    }
-
-    all_player_hrefs
   }
 
   STATS_COL_FILL = list(
@@ -359,49 +522,25 @@ scrape_player_stats <- function(driver = RSelenium::rsDriver(browser = "firefox"
     GoalkeepingSavePercentage = 0
   )
 
-  browser <- driver$client
-
-  stats <- scrape_player_links(browser) %>%
-    purrr::map(~ scrape_individual_player_stats(browser, .)) %>%
+  stats <- player_urls %>%
+    purrr::map(scrape_individual_player_stats) %>%
+    purrr::discard(is.null) %>%
+    purrr::map_depth(., 2, ~ do.call(scrape_individual_match_stats, .)) %>%
+    purrr::discard(is.null) %>%
+    purrr::map(nullify_partial_player_data) %>%
     unlist(., recursive = FALSE) %>%
     purrr::discard(is.null) %>%
-    purrr::map(~ scrape_individual_match_stats(browser, .)) %>%
-    purrr::map(readr::read_csv) %>%
-    purrr::map(
-      .,
-      ~ dplyr::mutate(
-        .,
-        HeightCm = as.numeric(HeightCm),
-        WeightKg = as.numeric(WeightKg),
-        Min = as.numeric(Min),
-        OffenseGls = as.numeric(OffenseGls),
-        OffenseAst = as.numeric(OffenseAst),
-        OffenseSh = as.numeric(OffenseSh),
-        OffenseSoT = as.numeric(OffenseSoT),
-        OffenseCrs = as.numeric(OffenseCrs),
-        OffenseFld = as.numeric(OffenseFld),
-        OffensePK = as.numeric(OffensePK),
-        OffensePKatt = as.numeric(OffensePKatt),
-        DefenseTkl = as.numeric(DefenseTkl),
-        DefenseInt = as.numeric(DefenseInt),
-        DefenseFls = as.numeric(DefenseFls),
-        DefenseCrdY = as.numeric(DefenseCrdY),
-        DefenseCrdR = as.numeric(DefenseCrdR),
-        GoalkeepingCS = coerce_optional_col_to_numeric(., "GoalkeepingCS"),
-        GoalkeepingGA = coerce_optional_col_to_numeric(., "GoalkeepingGA"),
-        GoalkeepingSaves = coerce_optional_col_to_numeric(., "GoalkeepingSaves"),
-        GoalkeepingSoTA = coerce_optional_col_to_numeric(., "GoalkeepingSoTA"),
-        GoalkeepingSavePercentage = coerce_optional_col_to_numeric(., "GoalkeepingSavePercentage")
-      )
-    ) %>%
+    purrr::map(coerce_column_data_types) %>%
     dplyr::bind_rows(.) %>%
     tidyr::drop_na(., Date) %>%
     tidyr::replace_na(., STATS_COL_FILL) %>%
     dplyr::mutate(., Comp = dplyr::coalesce(Comp, SeasonCompetition)) %>%
     dplyr::select(., -c("SeasonCompetition", "MatchReport"))
 
-  # driver$server$stop()
-  print(Sys.time())
+  print(paste0("Finished: ", Sys.time()))
 
-  stats
+  list(
+    data = stats,
+    skipped_urls = unique(skipped_urls)
+  )
 }
