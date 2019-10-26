@@ -7,7 +7,7 @@ FBREF_HOSTNAME <- "https://fbref.com"
 skipped_urls <- NULL
 
 fetch_html <- function(url, n_attempts = 0) {
-  # Using tryCatch here instead of tryCatchLog, because we're catching
+  # Using tryCatch without withCallingHandlers, because we're catching
   # random errors thrown by the server, not bugs in our code,
   # so there's no need to log them, but we still want to see
   # the warning messages without a stack trace.

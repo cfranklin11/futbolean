@@ -11,9 +11,6 @@ install.packages("rvest", quiet = TRUE, verbose = FALSE)
 install.packages("stringr", quiet = TRUE, verbose = FALSE)
 install.packages("tibble", quiet = TRUE, verbose = FALSE)
 install.packages("tidyr", quiet = TRUE, verbose = FALSE)
-install.packages("tryCatchLog", quiet = TRUE, verbose = FALSE)
-# Used by tryCatchLog for easier-to-read log messages
-install.packages("futile.logger", quiet = TRUE, verbose = FALSE)
 
 install.packages("roxygen2", quiet = TRUE, verbose = FALSE)
 install.packages("testthat", quiet = TRUE, verbose = FALSE)

@@ -13,7 +13,6 @@ Imports:
     BH,
     devtools,
     dplyr,
-    futile.logger,
     lubridate,
     plogr,
     plumber,
@@ -24,7 +23,6 @@ Imports:
     stringr,
     tibble,
     tidyr,
-    tryCatchLog,
 Suggests:
     roxygen2,
     testthat,
