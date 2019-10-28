@@ -1,14 +1,5 @@
-source(paste0(getwd(), "/R/hello.R"))
 source(paste0(getwd(), "/R/player_stats.R"))
 source(paste0(getwd(), "/R/player_urls.R"))
-
-#' Say hello to somebody
-#' @param name Name of the recipient of the salutation
-#' @get /hello
-function(name = "") {
-  hello(name) %>%
-    jsonlite::toJSON(.)
-}
 
 #' Fetch the URLs to individual player pages on fbref.com. Player lists
 #' are organized by season, but we deduplicate URLs for players
