@@ -1,5 +1,6 @@
 source(paste0(getwd(), "/R/hello.R"))
 source(paste0(getwd(), "/R/player_stats.R"))
+source(paste0(getwd(), "/R/player_urls.R"))
 
 #' Say hello to somebody
 #' @param name Name of the recipient of the salutation

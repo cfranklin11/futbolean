@@ -1,137 +1,6 @@
-fbref_hostname <- "https://fbref.com"
-skipped_urls <- NULL
-
 #' @importFrom magrittr %>%
-.fetch_html <- function(url, n_attempts = 0) {
-  # Using tryCatch without withCallingHandlers, because we're catching
-  # random errors thrown by the server, not bugs in our code,
-  # so there's no need to log them, but we still want to see
-  # the warning messages without a stack trace.
-  tryCatch({
-      Sys.sleep(floor(runif(1, min = 0, max = 6)))
-      n_attempts <- n_attempts + 1
-      xml2::read_html(url)
-    },
-    error = function(e) {
-      print(Sys.time())
 
-      warning(
-        paste0(
-          "Raised the following after ", n_attempts, " ",
-          ifelse(n_attempts == 1, "attempt", "attempts"), " on URL ", url,
-          "\n", e
-        )
-      )
-
-      if (n_attempts > 2) {
-        warning(
-          paste0(
-            "Skipping URL ", url, " after ", n_attempts, " scraping attempts."
-          )
-        )
-
-        # We don't save matchlog URLs, because it's easier to restart
-        # from the associated player's URL
-        if (!grepl("/matchlogs/", url)) {
-          assign(
-            "skipped_urls",
-            c(skipped_urls, url),
-            envir = .GlobalEnv
-          )
-        }
-
-        return(NULL)
-      }
-
-      Sys.sleep(20 * n_attempts)
-      closeAllConnections()
-      gc()
-      .fetch_html(url, n_attempts = n_attempts)
-    },
-    include.full.call.stack = FALSE,
-    include.compact.call.stack = FALSE
-  )
-}
-
-.scrape_links <- function(
-  player_hrefs = NULL,
-  path = "/en/comps/9/stats/Premier-League-Stats",
-  should_scrape = FALSE
-) {
-  player_link_selector <- "#stats_player [data-stat='player'] a"
-  prev_button_selector <- "a.button2.prev"
-  page_headline_selector <- "h1[itemprop='name']"
-
-  url <- paste0(fbref_hostname, path)
-  page <- .fetch_html(url)
-
-  if (is.null(page)) {
-    return(NULL)
-  }
-
-  page_headline <- page %>%
-    rvest::html_node(., page_headline_selector) %>%
-    rvest::html_text(.)
-
-  # TODO: Checking start/end seasons as characters is error-prone,
-  # probably better to convert them to integers, then compare to the season
-  # numbers on the current page, but this is simpler and works well enough
-  # for now
-  if (is.na(page_headline)) {
-    should_navigate_to_prev_season <- FALSE
-    at_end_season <- FALSE
-  } else {
-    should_navigate_to_prev_season <- page_headline %>%
-      stringr::str_match(., start_season) %>%
-      is.na
-    at_end_season <- page_headline %>%
-        stringr::str_match(., end_season) %>%
-        is.character
-  }
-
-  should_scrape_this_season <- ifelse(should_scrape, TRUE, at_end_season)
-
-  if (should_scrape_this_season) {
-    this_page_player_hrefs <- page %>%
-      xml2::xml_find_all(., "//comment()") %>%
-      .[[grep("data-stat=\"player\"", .)]] %>%
-      rvest::html_text(.) %>%
-      stringr::str_replace_all(., "^\n[:space:]+|\n$", "") %>%
-      xml2::read_html(.) %>%
-      rvest::html_nodes(., player_link_selector) %>%
-      purrr::map(~ rvest::html_attr(., "href")) %>%
-      unlist
-  } else {
-    this_page_player_hrefs <- NULL
-  }
-
-  all_player_hrefs <- c(player_hrefs, this_page_player_hrefs) %>% unique
-  # We start at the current/most-recent season and work our way back
-  prev_season_path <- page %>%
-    rvest::html_node(., prev_button_selector) %>%
-    rvest::html_attr(., "href")
-
-  if (should_navigate_to_prev_season && is.character(prev_season_path)) {
-    return(
-      .scrape_links(
-        player_hrefs = all_player_hrefs,
-        path = prev_season_path,
-        should_scrape = should_scrape_this_season
-      )
-    )
-  }
-
-  all_player_hrefs
-}
-
-scrape_player_links <- function(start_season, end_season) {
-  player_urls <- .scrape_links() %>%
-    purrr::discard(is.null) %>%
-    purrr::map(~ paste0(fbref_hostname, .)) %>%
-    unlist
-
-  list(data = player_urls, skipped_urls = unique(skipped_urls))
-}
+source(paste0(getwd(), "/R/utils.R"))
 
 .coerce_col_to_numeric <- function(data_frame, col_name) {
   if (is.null(data_frame[[col_name]])) {
@@ -444,7 +313,7 @@ scrape_player_links <- function(start_season, end_season) {
   match_url,
   competition_name
 ) {
-  page <- .fetch_html(match_url)
+  page <- fetch_html(match_url)
 
   if (is.null(page)) {
     return(list(player_url = player_url, data = NULL))
@@ -474,7 +343,7 @@ scrape_player_links <- function(start_season, end_season) {
     "#all_stats_player [data-stat='comp_level'] a"
   )
 
-  page <- .fetch_html(url)
+  page <- fetch_html(url)
 
   if (is.null(page)) {
     return(NULL)
