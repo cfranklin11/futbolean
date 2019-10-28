@@ -24,6 +24,7 @@ Imports:
     tibble,
     tidyr,
 Suggests:
+    lintr,
     roxygen2,
     testthat,
 RoxygenNote: 6.1.1

@@ -1,18 +1,13 @@
-# FBRef doesn't seem to have per-match player data before the 2014-2015 season.
-# We may want data aggregated by season, which goes back a bit futher,
-# eventually, but not for now
-EARLIEST_SEASON_WITH_PLAYER_MATCH_DATA <- "2014-2015"
-FBREF_HOSTNAME <- "https://fbref.com"
-
+fbref_hostname <- "https://fbref.com"
 skipped_urls <- NULL
 
+#' @importFrom magrittr %>%
 fetch_html <- function(url, n_attempts = 0) {
   # Using tryCatch without withCallingHandlers, because we're catching
   # random errors thrown by the server, not bugs in our code,
   # so there's no need to log them, but we still want to see
   # the warning messages without a stack trace.
-  tryCatch(
-    {
+  tryCatch({
       Sys.sleep(floor(runif(1, min = 0, max = 6)))
       n_attempts <- n_attempts + 1
       xml2::read_html(url)
@@ -64,11 +59,11 @@ scrape_player_links <- function(start_season, end_season) {
     path = "/en/comps/9/stats/Premier-League-Stats",
     should_scrape = FALSE
   ) {
-    PLAYER_LINK_SELECTOR <- "#stats_player [data-stat='player'] a"
-    PREV_BUTTON_SELECTOR <- "a.button2.prev"
-    PAGE_HEADLINE_SELECTOR <- "h1[itemprop='name']"
+    player_link_selector <- "#stats_player [data-stat='player'] a"
+    prev_button_selector <- "a.button2.prev"
+    page_headline_selector <- "h1[itemprop='name']"
 
-    url <- paste0(FBREF_HOSTNAME, path)
+    url <- paste0(fbref_hostname, path)
     page <- fetch_html(url)
 
     if (is.null(page)) {
@@ -76,7 +71,7 @@ scrape_player_links <- function(start_season, end_season) {
     }
 
     page_headline <- page %>%
-      rvest::html_node(., PAGE_HEADLINE_SELECTOR) %>%
+      rvest::html_node(., page_headline_selector) %>%
       rvest::html_text(.)
 
     # TODO: Checking start/end seasons as characters is error-prone,
@@ -84,10 +79,10 @@ scrape_player_links <- function(start_season, end_season) {
     # numbers on the current page, but this is simpler and works well enough
     # for now
     if (is.na(page_headline)) {
-      should_navigate_to_previous_season <- FALSE
+      should_navigate_to_prev_season <- FALSE
       at_end_season <- FALSE
     } else {
-      should_navigate_to_previous_season <- page_headline %>%
+      should_navigate_to_prev_season <- page_headline %>%
         stringr::str_match(., start_season) %>%
         is.na
       at_end_season <- page_headline %>%
@@ -104,7 +99,7 @@ scrape_player_links <- function(start_season, end_season) {
         rvest::html_text(.) %>%
         stringr::str_replace_all(., "^\n[:space:]+|\n$", "") %>%
         xml2::read_html(.) %>%
-        rvest::html_nodes(., PLAYER_LINK_SELECTOR) %>%
+        rvest::html_nodes(., player_link_selector) %>%
         purrr::map(~ rvest::html_attr(., "href")) %>%
         unlist
     } else {
@@ -114,10 +109,10 @@ scrape_player_links <- function(start_season, end_season) {
     all_player_hrefs <- c(player_hrefs, this_page_player_hrefs) %>% unique
     # We start at the current/most-recent season and work our way back
     prev_season_path <- page %>%
-      rvest::html_node(., PREV_BUTTON_SELECTOR) %>%
+      rvest::html_node(., prev_button_selector) %>%
       rvest::html_attr(., "href")
 
-    if (should_navigate_to_previous_season && is.character(prev_season_path)) {
+    if (should_navigate_to_prev_season && is.character(prev_season_path)) {
       return(
         scrape_links(
           player_hrefs = all_player_hrefs,
@@ -130,9 +125,9 @@ scrape_player_links <- function(start_season, end_season) {
     all_player_hrefs
   }
 
-  player_urls = scrape_links() %>%
+  player_urls <- scrape_links() %>%
     purrr::discard(is.null) %>%
-    purrr::map(~ paste0(FBREF_HOSTNAME, .)) %>%
+    purrr::map(~ paste0(fbref_hostname, .)) %>%
     unlist
 
   list(data = player_urls, skipped_urls = unique(skipped_urls))
@@ -150,8 +145,8 @@ scrape_player_stats <- function(player_urls) {
   }
 
   coerce_column_data_types <- function(data_frame) {
-    COERCE_INVALID_DATE_WARNING = "failed to parse"
-    COERCE_INVALID_NUMBERS_WARNING = "NAs introduced by coercion"
+    coerce_invalid_date_warning <- "failed to parse"
+    coerce_invalid_number_warning <- "NAs introduced by coercion"
 
     # Coercing columns results in major warning spam, and since the whole point
     # of this is to generate NAs for invalid rows, we don't need to hear
@@ -194,8 +189,8 @@ scrape_player_stats <- function(player_urls) {
       ),
       warning = function(w) {
         if (
-          grepl(COERCE_INVALID_DATE_WARNING, w$message) ||
-          grepl(COERCE_INVALID_NUMBERS_WARNING, w$message)
+          grepl(coerce_invalid_date_warning, w$message) ||
+          grepl(coerce_invalid_number_warning, w$message)
         ) {
           invokeRestart("muffleWarning")
         }
@@ -218,12 +213,14 @@ scrape_player_stats <- function(player_urls) {
     list()
   }
 
-  scrape_player_national_team <- function(player_info_fields, match_group_index) {
-    NATIONAL_TEAM_LABEL <- "National Team:"
-    NATIONAL_TEAM_REGEX <- paste0(NATIONAL_TEAM_LABEL, " (.+) [:alpha:]{2}")
+  scrape_player_national_team <- function(
+    player_info_fields, match_group_index
+  ) {
+    national_team_label <- "National Team:"
+    national_team_regex <- paste0(national_team_label, " (.+) [:alpha:]{2}")
 
     national_team_text <- player_info_fields %>%
-      purrr::detect(~ grepl(NATIONAL_TEAM_LABEL, .)) %>%
+      purrr::detect(~ grepl(national_team_label, .)) %>%
       unlist
 
     if (is.null(national_team_text)) {
@@ -231,7 +228,7 @@ scrape_player_stats <- function(player_urls) {
     }
 
     national_team_match_groups <- stringr::str_match(
-      national_team_text, NATIONAL_TEAM_REGEX
+      national_team_text, national_team_regex
     )
 
     if (any(is.na(national_team_match_groups))) {
@@ -242,19 +239,21 @@ scrape_player_stats <- function(player_urls) {
   }
 
   scrape_player_birthdate <- function(player_info_fields, match_group_index) {
-    BIRTHDATE_LABEL <- "Born:"
-    BIRTHDATE_REGEX <- paste0(
-      BIRTHDATE_LABEL, " ([:alpha:]+ [:digit:]{1,2}, [:digit:]{4})"
+    birthdate_label <- "Born:"
+    birthdate_regex <- paste0(
+      birthdate_label, " ([:alpha:]+ [:digit:]{1,2}, [:digit:]{4})"
     )
 
     birthdate_text <- player_info_fields %>%
-      purrr::detect(~ grepl(BIRTHDATE_LABEL, .))
+      purrr::detect(~ grepl(birthdate_label, .))
 
     if (is.null(birthdate_text)) {
       return("")
     }
 
-    birthdate_match_groups <- stringr::str_match(birthdate_text, BIRTHDATE_REGEX)
+    birthdate_match_groups <- stringr::str_match(
+      birthdate_text, birthdate_regex
+    )
 
     if (any(is.na(birthdate_match_groups))) {
       return("")
@@ -263,19 +262,21 @@ scrape_player_stats <- function(player_urls) {
     birthdate_match_groups[[match_group_index]]
   }
 
-  scrape_player_height_weight <- function(player_info_fields, match_group_index) {
-    HEIGHT_WEIGHT_LABELS <- "cm|kg"
-    HEIGHT_WEIGHT_REGEX <- "((?:[:digit:]+cm)?(?:, )?(?:[:digit:]+kg)?)"
+  scrape_player_height_weight <- function(
+    player_info_fields, match_group_index
+  ) {
+    height_weight_labels <- "cm|kg"
+    height_weight_regex <- "((?:[:digit:]+cm)?(?:, )?(?:[:digit:]+kg)?)"
 
     height_weight_text <- player_info_fields %>%
-      purrr::detect(~ grepl(HEIGHT_WEIGHT_LABELS, .))
+      purrr::detect(~ grepl(height_weight_labels, .))
 
     if (is.null(height_weight_text)) {
       return(c("", ""))
     }
 
     height_weight_match_groups <- stringr::str_match(
-      height_weight_text, HEIGHT_WEIGHT_REGEX
+      height_weight_text, height_weight_regex
     )
 
     if (any(is.na(height_weight_match_groups))) {
@@ -283,7 +284,7 @@ scrape_player_stats <- function(player_urls) {
     }
 
     height_weight <- height_weight_match_groups[[match_group_index]] %>%
-      stringr::str_split(., ", ") %>%
+      stringr::str_split(", ") %>%
       unlist
 
     height <- height_weight %>%
@@ -300,25 +301,30 @@ scrape_player_stats <- function(player_urls) {
   }
 
   scrape_player_position <- function(player_info_fields, match_group_index) {
-    POSITION_LABEL <- "Position:"
-    FIRST_POSITION_REGEX <- "[:alpha:]+"
-    SECOND_POSITION_REGEX <- "(?:-[:alpha:]+)?"
-    GENERAL_POSITION_REGEX <- paste0(FIRST_POSITION_REGEX, SECOND_POSITION_REGEX)
-    EXTRA_POSITION_INFO <- "(?:, [:alpha:])?"
-    SPECIFIC_POSITION_REGEX <- paste0("(?: \\(", GENERAL_POSITION_REGEX, EXTRA_POSITION_INFO, "\\))?")
-    PLAYER_POSITION_REGEX <- paste0(
-      POSITION_LABEL, " (", GENERAL_POSITION_REGEX, SPECIFIC_POSITION_REGEX, ")"
+    postigion_label <- "Position:"
+    first_position_regex <- "[:alpha:]+"
+    second_position_regex <- "(?:-[:alpha:]+)?"
+    general_position_regex <- paste0(
+      first_position_regex, second_position_regex
+    )
+    extra_position_info <- "(?:, [:alpha:])?"
+    specific_position_regex <- paste0(
+      "(?: \\(", general_position_regex, extra_position_info, "\\))?"
+    )
+    player_position_regex <- paste0(
+      postigion_label,
+      " (", general_position_regex, specific_position_regex, ")"
     )
 
     player_position_text <- player_info_fields %>%
-      purrr::detect(~ grepl(POSITION_LABEL, .))
+      purrr::detect(~ grepl(postigion_label, .))
 
     if (is.null(player_position_text)) {
       return("")
     }
 
     player_position_match_groups <- stringr::str_match(
-      player_position_text, PLAYER_POSITION_REGEX
+      player_position_text, player_position_regex
     )
 
     if (any(is.na(player_position_match_groups))) {
@@ -330,10 +336,10 @@ scrape_player_stats <- function(player_urls) {
   }
 
   scrape_player_info <- function(page, competition_name) {
-    PLAYER_NAME_SELECTOR <- "h1[itemprop='name']"
-    PLAYER_INFO_SELECTOR <- "[itemtype='https://schema.org/Person'] p"
-    MATCH_GROUP_INDEX <- 2
-    PLAYER_INFO_COLS <- c(
+    player_name_selector <- "h1[itemprop='name']"
+    player_info_selector <- "[itemtype='https://schema.org/Person'] p"
+    match_group_index <- 2
+    player_info_cols <- c(
       "Player",
       "Position",
       "HeightCm",
@@ -343,16 +349,25 @@ scrape_player_stats <- function(player_urls) {
       "SeasonCompetition"
     )
 
-    player_name <- rvest::html_node(page, PLAYER_NAME_SELECTOR) %>% rvest::html_text(.)
+    player_name <- rvest::html_node(page, player_name_selector) %>%
+      rvest::html_text(.)
 
-    player_info_fields <- rvest::html_nodes(page, PLAYER_INFO_SELECTOR) %>%
+    player_info_fields <- rvest::html_nodes(page, player_info_selector) %>%
       purrr::map(rvest::html_text) %>%
       unlist
 
-    player_position <- scrape_player_position(player_info_fields, MATCH_GROUP_INDEX)
-    height_weight <- scrape_player_height_weight(player_info_fields, MATCH_GROUP_INDEX)
-    birthdate <- scrape_player_birthdate(player_info_fields, MATCH_GROUP_INDEX)
-    national_team <- scrape_player_national_team(player_info_fields, MATCH_GROUP_INDEX)
+    player_position <- scrape_player_position(
+      player_info_fields, match_group_index
+    )
+    height_weight <- scrape_player_height_weight(
+      player_info_fields, match_group_index
+    )
+    birthdate <- scrape_player_birthdate(
+      player_info_fields, match_group_index
+    )
+    national_team <- scrape_player_national_team(
+      player_info_fields, match_group_index
+    )
 
     player_info_values <- c(
       player_name,
@@ -369,14 +384,14 @@ scrape_player_stats <- function(player_urls) {
       purrr::map(~ stringr::str_replace_all(., ",", "")) %>%
       unlist
 
-    setNames(as.list(clean_player_values), PLAYER_INFO_COLS)
+    setNames(as.list(clean_player_values), player_info_cols)
   }
 
   extract_header_cell_text <- function(header_cell) {
     cell_colspan <- rvest::html_attr(header_cell, "colspan")
     cell_text <- rvest::html_text(header_cell) %>%
-      # I don't really like how spaces look in col labels, and most of the labels
-      # are in pascal case anyway
+      # I don't really like how spaces look in col labels,
+      # and most of the labels are in pascal case anyway
       stringr::str_replace_all(., " ", "") %>%
       stringr::str_replace_all(., "%", "Percentage")
 
@@ -388,18 +403,21 @@ scrape_player_stats <- function(player_urls) {
   }
 
   scrape_player_stats <- function(page, path) {
-    N_HEADER_ROWS <- 2
+    n_header_rows <- 2
 
+    # nolint start
     # FBRef will display up to 3 data tables, separated by competiton:
-    # 1. #ks_matchlogs_all = All competitions
-    # 2. #ks_matchlogs_<4-digit number> = Domestic league competition
-    # 3. #ks_matchologs_<4-digit number> = International competition (if available)
+    # 1. #ks_matchlogs_all is for All competitions
+    # 2. #ks_matchlogs_<4-digit number> is for Domestic league competition
+    # 3. #ks_matchologs_<4-digit number> is for International competition
+    #   (if available)
     # None of these is guaranteed to appear, so the selector must be flexible.
-    DATA_TABLE_SELECTOR <- "table[id^=ks_matchlogs_]"
+    # nolint end
+    data_table_selector <- "table[id^=ks_matchlogs_]"
 
     # We always want the first data table, because it is for "All competitions"
     # when available and the relevant domestic competition when not.
-    html_table <- page %>% rvest::html_node(., DATA_TABLE_SELECTOR)
+    html_table <- page %>% rvest::html_node(., data_table_selector)
 
     # Some pages are missing match data tables
     if (is.na(html_table)) {
@@ -417,7 +435,7 @@ scrape_player_stats <- function(player_urls) {
 
     table_body <- html_table %>%
       rvest::html_table(., fill = TRUE, header = FALSE) %>%
-      dplyr::slice(., (N_HEADER_ROWS + 1):length(.))
+      dplyr::slice(., (n_header_rows + 1):length(.))
 
     colnames(table_body) <- table_header
 
@@ -454,8 +472,10 @@ scrape_player_stats <- function(player_urls) {
     # matches in international competitions (e.g. Champions League),
     # and I want to keep it relatively simple & consistent for now.
     # Might include international matches sometime later.
-    DOMESTIC_COMPS_MATCH_LINK_SELECTOR <- "#all_stats_player [data-stat='matches'] a"
-    DOMESTIC_COMPS_COMP_LINK_SELECTOR <- "#all_stats_player [data-stat='comp_level'] a"
+    domestic_match_link_selector <- "#all_stats_player [data-stat='matches'] a"
+    domestic_comp_link_selector <- (
+      "#all_stats_player [data-stat='comp_level'] a"
+    )
 
     page <- fetch_html(url)
 
@@ -464,12 +484,12 @@ scrape_player_stats <- function(player_urls) {
     }
 
     match_urls <- page %>%
-      rvest::html_nodes(., DOMESTIC_COMPS_MATCH_LINK_SELECTOR) %>%
+      rvest::html_nodes(., domestic_match_link_selector) %>%
       purrr::map(~ rvest::html_attr(., "href")) %>%
       # Match paths can be duplicated if a player played for two different teams
       # in one season
       unique %>%
-      purrr::map(~ paste0(FBREF_HOSTNAME, .)) %>%
+      purrr::map(~ paste0(fbref_hostname, .)) %>%
       unlist
 
     # Some older player pages don't have links to per-match data pages, so we
@@ -482,7 +502,7 @@ scrape_player_stats <- function(player_urls) {
     }
 
     comp_names <- page %>%
-      rvest::html_nodes(., DOMESTIC_COMPS_COMP_LINK_SELECTOR) %>%
+      rvest::html_nodes(., domestic_comp_link_selector) %>%
       # There will often be more rows with competition values than rows with
       # links to per-match data pages, so we take the last n rows, where
       # n = number of rows with matches links
@@ -497,7 +517,7 @@ scrape_player_stats <- function(player_urls) {
     )
   }
 
-  STATS_COL_FILL = list(
+  stats_col_fill <- list(
     HeightCm = 0,
     WeightKg = 0,
     NationalTeam = "",
@@ -533,7 +553,7 @@ scrape_player_stats <- function(player_urls) {
     purrr::map(coerce_column_data_types) %>%
     dplyr::bind_rows(.) %>%
     tidyr::drop_na(., Date) %>%
-    tidyr::replace_na(., STATS_COL_FILL) %>%
+    tidyr::replace_na(., stats_col_fill) %>%
     dplyr::mutate(., Comp = dplyr::coalesce(Comp, SeasonCompetition)) %>%
     dplyr::select(., -c("SeasonCompetition", "MatchReport"))
 
