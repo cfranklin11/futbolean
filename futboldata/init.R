@@ -12,5 +12,6 @@ install.packages("stringr", quiet = TRUE, verbose = FALSE)
 install.packages("tibble", quiet = TRUE, verbose = FALSE)
 install.packages("tidyr", quiet = TRUE, verbose = FALSE)
 
+install.packages("lintr", quite = TRUE, verbose = FALSE)
 install.packages("roxygen2", quiet = TRUE, verbose = FALSE)
 install.packages("testthat", quiet = TRUE, verbose = FALSE)

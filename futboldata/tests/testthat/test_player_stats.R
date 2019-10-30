@@ -1,35 +1,10 @@
-describe("scrape_player_links()", {
-  START_SEASON <- "2016-2017"
-  END_SEASON <- "2017-2018"
-  N_SEASONS <- 2
-
-  # Fetching data takes awhile, so we do it once for all tests
-  player_urls <- scrape_player_links(
-    start_season = START_SEASON,
-    end_season = END_SEASON
-  )
-
-  it("returns a vector of url characters", {
-    expect_true("character" %in% class(player_urls$data))
-
-    expect_gt(length(player_urls$data), N_SEASONS)
-
-    all_are_player_urls <- player_urls$data %>%
-      purrr::map(~ grepl('https://fbref.com/en/players/', .)) %>%
-      unlist %>%
-      all
-
-    expect_true(all_are_player_urls)
-  })
-})
-
 describe("scrape_player_stats()", {
-  PLAYER_URLS <- c(
+  player_urls <- c(
     "https://fbref.com/en/players/6b47c5db/Wilfred-Ndidi",
     "https://fbref.com/en/players/52465662/Rio-Ferdinand"
   )
 
-  player_stats <- scrape_player_stats(PLAYER_URLS)
+  player_stats <- scrape_player_stats(player_urls)
 
   it("returns a list of data and skipped URLs", {
     expect_true("list" %in% class(player_stats))
@@ -48,7 +23,7 @@ describe("scrape_player_stats()", {
   it("returns player stats", {
     player_data <- player_stats$data
 
-    expect_gt(nrow(player_data), length(PLAYER_URLS))
+    expect_gt(nrow(player_data), length(player_urls))
 
     expect_type(player_data$Date, "double")
     expect_type(player_data$Day, "character")
@@ -98,15 +73,20 @@ describe("scrape_player_stats()", {
 
       expect_true(all_are_player_urls)
 
+      match_url_regex <- paste0(
+        "https://fbref.com/en/players/",
+        "[[:alnum:]]+/matchlogs/[[:digit:]]{4}-[[:digit:]]{4}/"
+      )
+
       any_are_match_urls <- skipped_player_urls %>%
-        purrr::map(~ grepl("https://fbref.com/en/players/[[:alnum:]]+/matchlogs/[[:digit:]]{4}-[[:digit:]]{4}/", .)) %>%
+        purrr::map(~ grepl(match_url_regex, .)) %>%
         unlist %>%
         any
 
       expect_false(any_are_match_urls)
 
       all_are_match_urls <- skipped_match_urls %>%
-        purrr::map(~ grepl("https://fbref.com/en/players/[[:alnum:]]+/matchlogs/[[:digit:]]{4}-[[:digit:]]{4}/", .)) %>%
+        purrr::map(~ grepl(match_url_regex, .)) %>%
         unlist %>%
         all
 
