@@ -8,6 +8,12 @@ source(paste0(getwd(), "/R/player_urls.R"))
 #' @param end_season Last season to scrape data for. Format: YYYY-YYYY.
 #' @get /player_urls
 function(start_season, end_season) {
+  assign(
+    "skipped_urls",
+    NULL,
+    envir = .GlobalEnv
+  )
+
   withCallingHandlers({
       scrape_player_links(start_season, end_season) %>%
       list(data = ., error = NULL)
@@ -27,6 +33,12 @@ function(start_season, end_season) {
 #' @param player_urls List of URLs to player pages.
 #' @get /player_stats
 function(player_urls) {
+  assign(
+    "skipped_urls",
+    NULL,
+    envir = .GlobalEnv
+  )
+
   withCallingHandlers({
       scrape_player_stats(player_urls) %>%
       list(data = ., error = NULL)
