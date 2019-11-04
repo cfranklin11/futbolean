@@ -1,13 +1,13 @@
 """Application entry point."""
 
-from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Dict
 
 from kedro.context import KedroContext
 from kedro.runner import AbstractRunner
 from kedro.pipeline import Pipeline
 
-from futbolean.pipeline import create_pipeline
+from futbolean.pipeline import create_pipelines, create_epl_player_pipeline
+from futbolean.settings import BASE_DIR
 
 
 class ProjectContext(KedroContext):
@@ -16,12 +16,15 @@ class ProjectContext(KedroContext):
 
     """
 
-    project_name = "futbolean"
-    project_version = "0.15.0"
+    project_name = "Futbolean"
+    project_version = "0.15.4"
 
     @property
-    def pipeline(self) -> Pipeline:
-        return create_pipeline()
+    def pipeline(self):
+        return create_epl_player_pipeline()
+
+    def _get_pipelines(self) -> Dict[str, Pipeline]:  # pylint: disable=no-self-use
+        return create_pipelines()
 
 
 def main(
@@ -51,7 +54,7 @@ def main(
             end point of the new ``Pipeline``.
 
     """
-    context = ProjectContext(Path.cwd(), env)
+    context = ProjectContext(BASE_DIR, env)
 
     return context.run(tags, runner, node_names, from_nodes, to_nodes)
 

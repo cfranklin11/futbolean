@@ -1,3 +1,5 @@
+unidecode
+
 # Data packages
 numpy
 pandas>=0.23.0,<0.26.0
@@ -7,7 +9,7 @@ scipy
 kaggle
 
 # Kedro packages
-kedro==0.15.0
+kedro==0.15.4
 ipython>=7.0.0, <8.0
 jupyter>=1.0.0, <2.0
 jupyterlab==1.1.1

@@ -1,63 +1,47 @@
-# Copyright 2018-2019 QuantumBlack Visual Analytics Limited
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
-# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND
-# NONINFRINGEMENT. IN NO EVENT WILL THE LICENSOR OR OTHER CONTRIBUTORS
-# BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN
-# ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF, OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-# The QuantumBlack Visual Analytics Limited ("QuantumBlack") name and logo
-# (either separately or in combination, "QuantumBlack Trademarks") are
-# trademarks of QuantumBlack. The License does not grant you any right or
-# license to the QuantumBlack Trademarks. You may not use the QuantumBlack
-# Trademarks or any confusingly similar mark as a trademark for your product,
-#     or use the QuantumBlack Trademarks in any other manner that might cause
-# confusion in the marketplace, including but not limited to in advertising,
-# on websites, or on software.
-#
-# See the License for the specific language governing permissions and
-# limitations under the License.
 """Pipeline construction."""
+
+from typing import Dict
 
 from kedro.pipeline import Pipeline, node
 
+from futbolean.nodes import player
 
-def create_pipeline(**_kwargs):
+
+def create_pipelines(**_kwargs) -> Dict[str, Pipeline]:
     """Create the project's pipeline.
 
     Args:
         kwargs: Ignore any additional arguments added in the future.
 
     Returns:
-        Pipeline: The resulting pipeline.
+        A mapping from a pipeline name to a ``Pipeline`` object.
 
     """
 
-    pipeline = Pipeline(
-        [
-            node(
-                lambda *x: x,
-                [
-                    "european_player_attributes",
-                    "european_players",
-                    "european_matches",
-                    "european_leagues",
-                    "european_countries",
-                    "european_teams",
-                    "european_team_attributes",
-                    "epl_player_matches",
-                ],
-                "data",
-            )
-        ]
-    )
+    return {
+        "__default__": Pipeline(
+            [
+                node(
+                    lambda *x: x,
+                    [
+                        "european_player_attributes",
+                        "european_players",
+                        "european_matches",
+                        "european_leagues",
+                        "european_countries",
+                        "european_teams",
+                        "european_team_attributes",
+                        "epl_player_matches",
+                    ],
+                    "data",
+                )
+            ]
+        ),
+        "epl_player": create_epl_player_pipeline(),
+    }
 
-    return pipeline
+
+def create_epl_player_pipeline() -> Pipeline:
+    """Create pipeline to process per-match data for EPL players"""
+
+    return Pipeline([node(player.clean, "epl_player_matches", "clean_epl_players")])
